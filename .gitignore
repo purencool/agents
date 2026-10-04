@@ -21,7 +21,8 @@
 !vite.config.js
 !tailwind.config.js
 !postcss.config.js
-
+!env.example
+!manage
 # =====================================================================
 # Strict Overrides for Folders Whitelisted Above
 # =====================================================================
