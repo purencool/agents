@@ -23,6 +23,7 @@
 !postcss.config.js
 !env.example
 !manage
+!phpunit.xml.dist
 # =====================================================================
 # Strict Overrides for Folders Whitelisted Above
 # =====================================================================
