@@ -2,39 +2,27 @@
 
 namespace Tests\Unit\PncAgentics\Agents;
 
-use PHPUnit\Framework\TestCase;
-use App\PncAgentics\Agents\ExampleAgent;
 use App\PncAgentics\Agents\BaseAgent;
-use App\PncServices\Contracts\AIServiceInterface;
-use App\PncServices\Contracts\RestServiceInterface;
+use PHPUnit\Framework\TestCase;
 
 class BaseAgentTest extends TestCase
 {
-    protected function makeAgent(): ExampleAgent
+    /** @test */
+    public function base_agent_can_be_instantiated(): void
     {
-        $ai   = $this->createMock(AIServiceInterface::class);
-        $rest = $this->createMock(RestServiceInterface::class);
-        return new ExampleAgent($ai, $rest);
-    }
+        $agent = new BaseAgent();
 
-    public function test_it_extends_base_agent(): void
-    {
-        $agent = $this->makeAgent();
         $this->assertInstanceOf(BaseAgent::class, $agent);
     }
 
-    public function test_name_returns_string(): void
+    /** @test */
+    public function base_agent_has_skill_toolkit_configured(): void
     {
-        $agent = $this->makeAgent();
-        $this->assertIsString($agent->name());
-    }
+        $agent = new BaseAgent();
 
-    public function test_run_returns_array(): void
-    {
-        $agent = $this->makeAgent();
-        $result = $agent->run(['prompt' => 'Hello']);
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('agent', $result);
-        $this->assertArrayHasKey('response', $result);
+        // Verify the agent has tools registered (SkillToolkit)
+        $tools = $agent->tools();
+
+        $this->assertNotEmpty($tools, 'BaseAgent should have at least one tool (SkillToolkit)');
     }
 }

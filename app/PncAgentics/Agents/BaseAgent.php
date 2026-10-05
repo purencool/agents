@@ -6,11 +6,24 @@ use App\PncServices\Contracts\AIServiceInterface;
 use App\PncServices\Contracts\RestServiceInterface;
 use Illuminate\Support\Facades\Log;
 
+/**
+ *
+ */
 abstract class BaseAgent
 {
+    /**
+     *
+     */
     protected AIServiceInterface $ai;
+    
+    /**
+     *
+     */
     protected RestServiceInterface $rest;
 
+    /**
+     *
+     */
     public function __construct(
         AIServiceInterface $ai,
         RestServiceInterface $rest
@@ -19,14 +32,27 @@ abstract class BaseAgent
         $this->rest = $rest;
     }
 
+    /**
+     *
+     */
     abstract public function name(): string;
+    
+    /**
+     *
+     */
     abstract public function run(array $input): array;
 
-    protected function think(string $prompt): string
+    /**
+     *
+     */
+    protected function think(string $prompt, string $system = ''): string
     {
-        return $this->ai->complete($prompt);
+        return $this->ai->complete($prompt, ['system' => $system]);
     }
 
+    /**
+     *
+     */
     protected function fetch(string $endpoint, array $params = []): array
     {
         return $this->rest->get($endpoint, $params);

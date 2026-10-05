@@ -24,7 +24,7 @@ class Log500Error extends Command
 
         $logger->logRequestError($method, $uri, 500, $message, $context);
 
-        $this->info("✅ 500 error logged: [{$method}] {$uri} — {$message}");
+        $this->info("500 error logged: [{$method}] {$uri} — {$message}");
 
         return self::SUCCESS;
     }

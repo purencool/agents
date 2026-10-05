@@ -21,7 +21,7 @@ class Test500Logging extends Command
             ['source' => 'pnc:test-500-logging', 'test' => true]
         );
 
-        $this->info("✅ Logging service responded. Check your log files.");
+        $this->info("Logging service responded. Check your log files.");
         $this->line("   Channel: " . config('pncservices.logging.channel', 'stack'));
         $this->line("   File: " . storage_path('logs/laravel.log'));
 
