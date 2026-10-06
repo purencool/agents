@@ -4,27 +4,31 @@ namespace App\Console\Commands\Pnc;
 
 use Illuminate\Console\Command;
 use App\PncServices\Contracts\LoggingServiceInterface;
-use App\PncAgentics\Agents\Agent as Agent;
+use App\PncAgentics\Agents\Agent;
 
 /**
+ * @example  php artisan pnc:agent --input='{
+ *   "skill": "communications_pr.internal_communications.skills",
+ *   "prompt": "Draft an announcement for the new AI tooling.",
+ *   "system": " You are talking to software engineers.",
+ *   "temperature": 0.7
+ * }'
  *
  */
 class AIAgent extends Command
 {
-    
     /**
-     *
+     * The name and signature of the console command.
      */
-    protected $signature = 'pnc:agent
-                            {--input= : JSON string with prompt, system, temperature, etc.}';
+    protected $signature = 'pnc:agent {--input= : JSON string with prompt, system, temperature, etc.}';
 
     /**
-     *
+     * The console command description.
      */
     protected $description = 'Create documentation.';
 
     /**
-     *
+     * Execute the console command.
      */
     public function handle(
         LoggingServiceInterface $logger,
@@ -73,3 +77,4 @@ class AIAgent extends Command
         return self::SUCCESS;
     }
 }
+
