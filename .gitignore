@@ -24,6 +24,8 @@
 !env.example
 !manage
 !phpunit.xml.dist
+!phpcs.xml
+!.phpstorm.meta.php
 # =====================================================================
 # Strict Overrides for Folders Whitelisted Above
 # =====================================================================

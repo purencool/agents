@@ -8,11 +8,13 @@ use App\PncServices\Contracts\AIServiceInterface;
 use App\PncServices\Contracts\SMSInterface;
 use App\PncServices\Contracts\RestServiceInterface;
 use App\PncServices\Contracts\LoggingServiceInterface;
+use App\PncServices\Contracts\AgentStoreInterface;
 use App\PncServices\Logging\LoggingService;
 use App\PncServices\Email\EmailService;
 use App\PncServices\AI\AIService;
 use App\PncServices\SMS\SMS;
 use App\PncServices\REST\RestService;
+use App\PncServices\Agent\AgentStoreService;
 
 class PncServicesServiceProvider extends ServiceProvider
 {
@@ -23,10 +25,14 @@ class PncServicesServiceProvider extends ServiceProvider
         $this->app->bind(SMSInterface::class, SMS::class);
         $this->app->bind(RestServiceInterface::class, RestService::class);
         $this->app->bind(LoggingServiceInterface::class, LoggingService::class);
+        $this->app->bind(AgentStoreInterface::class, AgentStoreService::class);
     }
 
     public function boot(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../../config/pncservices.php', 'pncservices');
+        $this->mergeConfigFrom(
+            __DIR__ . "/../../config/pncservices.php",
+            "pncservices",
+        );
     }
 }
