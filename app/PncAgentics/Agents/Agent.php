@@ -3,18 +3,17 @@
 namespace App\PncAgentics\Agents;
 
 /**
- * @example php artisan pnc:agent --input='{"prompt":"Write documentation about the best app in the world", "skill":"documentation" }' -vvv
+ *
  *
  */
 class Agent extends BaseAgent
 {
-
     /**
      * @inherit
      */
     public function name(): string
     {
-        return 'Agent';
+        return "Agent";
     }
 
     /**
@@ -22,13 +21,12 @@ class Agent extends BaseAgent
      */
     public function run(array $input): array
     {
-
         $response = $this->think(
-            $input['prompt'] ?? '',
-            $input['system'] ?? '',
-            $input['temperature'] ?? ''
+            $input["prompt"] ?? "",
+            $input["system"] ?? "",
+            $input["temperature"] ?? "",
         );
 
-        return ['agent' => $this->name(), 'response' => $response];
+        return ["agent" => $this->name(), "response" => $response];
     }
 }

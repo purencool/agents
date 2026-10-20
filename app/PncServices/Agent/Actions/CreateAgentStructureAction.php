@@ -24,6 +24,7 @@ class CreateAgentStructureAction
         $currentDate = now()->format("Y-m-d");
 
         // Base directory configuration
+        // @todo This needs to use the .env path
         $baseDataStore = base_path("../data/agents/data");
 
         // Target paths
