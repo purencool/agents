@@ -6,10 +6,15 @@ use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Data\SkillOptions;
 use App\PncServices\Contracts\AIServiceInterface;
 use InvalidArgumentException;
-use Illuminate\Support\Str;
 
 class SkillExecutor implements SkillExecutorInterface
 {
+    /**
+     * In-memory static cache container to shield local machine environments
+     * from repetitive disk I/O.
+     */
+    protected static array $loadedPrompts = [];
+
     public function __construct(protected AIServiceInterface $aiService) {}
 
     public function execute(
@@ -17,28 +22,94 @@ class SkillExecutor implements SkillExecutorInterface
         array $variables = [],
         array $options = [],
     ): string {
-        // Convert the dot notation back into physical directory slashes
-        $relativePath = str_replace(".", DIRECTORY_SEPARATOR, $skillKey);
+        // Convert the dot notation key into the standard relative filename path
+        if (str_ends_with($skillKey, ".skills")) {
+            $cleanSkillKey = substr($skillKey, 0, -7);
+            $lastDotPos = strrpos($cleanSkillKey, ".");
+            $directoryParts = substr($cleanSkillKey, 0, $lastDotPos);
+            $fileName = substr($cleanSkillKey, $lastDotPos + 1);
 
-        // Build the absolute physical file system path pointing to the .md file
-        $filePath = app_path(
-            "PncAgentics" .
+            $relativePath =
+                str_replace(".", DIRECTORY_SEPARATOR, $directoryParts) .
                 DIRECTORY_SEPARATOR .
-                "Skills" .
-                DIRECTORY_SEPARATOR .
-                $relativePath .
-                ".md",
-        );
-
-        // Verify the target markdown file physically exists on disk
-        if (!file_exists($filePath)) {
-            throw new InvalidArgumentException(
-                "Neuro-Laravel Agent Skill File could not be located at path: [{$filePath}]. Check your file casing or namespace.",
-            );
+                $fileName .
+                ".skills.md";
+        } else {
+            $relativePath =
+                str_replace(".", DIRECTORY_SEPARATOR, $skillKey) . ".md";
         }
 
-        // Read the text instructions directly from the file canvas
-        $rawSystemInstructions = file_get_contents($filePath);
+        // Initialize content tracking vectors
+        $prependContent = "";
+        $baseSystemInstructions = "";
+        $resolvedFileSource = "";
+
+        $prependsBase = env("OVERLAY_PREPENDS");
+        if ($prependsBase) {
+            $prependsBaseResolved = base_path($prependsBase);
+            $prependFilePath = realpath(
+                $prependsBaseResolved . DIRECTORY_SEPARATOR . $relativePath,
+            );
+
+            if ($prependFilePath && file_exists($prependFilePath)) {
+                // If the file is not in our static cache array yet, read it from disk
+                if (!isset(self::$loadedPrompts[$prependFilePath])) {
+                    self::$loadedPrompts[$prependFilePath] = file_get_contents(
+                        $prependFilePath,
+                    );
+                }
+                $prependContent =
+                    self::$loadedPrompts[$prependFilePath] . "\n\n";
+            }
+        }
+
+        $overridesBase = env("OVERLAY_OVERRIDES");
+        if ($overridesBase) {
+            $overridesBaseResolved = base_path($overridesBase);
+            $overrideFilePath = realpath(
+                $overridesBaseResolved . DIRECTORY_SEPARATOR . $relativePath,
+            );
+
+            if ($overrideFilePath && file_exists($overrideFilePath)) {
+                // Read from cache, or read from disk once and save to cache
+                if (!isset(self::$loadedPrompts[$overrideFilePath])) {
+                    self::$loadedPrompts[$overrideFilePath] = file_get_contents(
+                        $overrideFilePath,
+                    );
+                }
+                $baseSystemInstructions =
+                    self::$loadedPrompts[$overrideFilePath];
+                $resolvedFileSource = $overrideFilePath;
+            }
+        }
+
+        if (empty($baseSystemInstructions)) {
+            $fallbackPath = app_path(
+                "PncAgentics" .
+                    DIRECTORY_SEPARATOR .
+                    "Skills" .
+                    DIRECTORY_SEPARATOR .
+                    $relativePath,
+            );
+
+            if (!file_exists($fallbackPath)) {
+                throw new InvalidArgumentException(
+                    "Neuro-Laravel Agent Skill File could not be located at path: [{$fallbackPath}]. Check your file casing or namespace.",
+                );
+            }
+
+            // Read fallback baseline from cache, or hit disk once and store it
+            if (!isset(self::$loadedPrompts[$fallbackPath])) {
+                self::$loadedPrompts[$fallbackPath] = file_get_contents(
+                    $fallbackPath,
+                );
+            }
+            $baseSystemInstructions = self::$loadedPrompts[$fallbackPath];
+            $resolvedFileSource = $fallbackPath;
+        }
+
+        // Merge the layers together. Prepend information smoothly stitches to the top of either source.
+        $rawSystemInstructions = $prependContent . $baseSystemInstructions;
 
         $configOptions = SkillOptions::fromArray($options);
 
@@ -60,13 +131,12 @@ class SkillExecutor implements SkillExecutorInterface
             "max_tokens" => $configOptions->maxTokens,
             "metadata" => [
                 "skill_executed" => $skillKey,
+                "resolved_file" => $resolvedFileSource,
+                "has_prepended" => !empty($prependContent),
             ],
         ]);
     }
 
-    /**
-     * Replaces shortcode placeholder notation tags within the skills.md file strings.
-     */
     protected function parsePlaceholders(
         string $template,
         array $variables,
@@ -83,9 +153,6 @@ class SkillExecutor implements SkillExecutorInterface
         return $template;
     }
 
-    /**
-     * Assembles a structural payload that keeps instructions distinct from workspace variables.
-     */
     protected function buildPromptPayload(
         string $instructions,
         array $variables,

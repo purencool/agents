@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands\Pnc;
 
-use App\PncAgentics\Contracts\WorkflowFactoryInterface; // <-- Updated factory import
-use App\PncServices\Contracts\AgentStoreInterface; // <-- Added to find historical folders safely
+use App\PncAgentics\Contracts\WorkflowFactoryInterface;
+use App\PncServices\Contracts\AgentStoreInterface;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -19,12 +19,10 @@ class DataUpdate extends Command
     /**
      * The console command description.
      */
-    protected $description = "Accepts a JSON payload to reframe, rewrite, and update existing documentation files using AI";
+    protected $description = "Accepts a JSON payload to batch reframe, rewrite, and update existing target content track files using AI";
 
     /**
      * Execute the console command.
-     *
-     * Injects the Factory Interface and Agent Store dependency layers.
      */
     public function handle(
         WorkflowFactoryInterface $workflowFactory,
@@ -41,16 +39,20 @@ class DataUpdate extends Command
             return self::FAILURE;
         }
 
+        // Enforce strict, distinct keys
+        // matching your architectural parameters
         $validator = Validator::make($payload, [
             "domain" => "required|string",
             "type" => "required|string",
             "title" => "required|string",
             "description" => "required|string",
+            "content_tracks" => "required|array|min:1",
+            "content_tracks.*" => "required|string",
         ]);
 
         if ($validator->fails()) {
             $this->error(
-                "Validation Failed: The JSON payload is missing required keys or contains invalid types.",
+                "Validation Failed: The JSON payload contains missing or invalid keys.",
             );
             foreach ($validator->errors()->all() as $error) {
                 $this->warn("- $error");
@@ -58,96 +60,134 @@ class DataUpdate extends Command
             return self::FAILURE;
         }
 
-        $this->info("Initiating AI Content Reframing Workflow Pipeline:");
-        $listItems = [
-            "Domain: " . $payload["domain"],
-            "Type:   " . $payload["type"],
-            "Title:  " . $payload["title"],
-            "New Description: " . $payload["description"],
-        ];
+        $this->info("Initiating AI Content Reframing Batch Workflow Pipeline:");
+        $this->line(" • Domain: " . $payload["domain"]);
+        $this->line(" • Type:   " . $payload["type"]);
+        $this->line(" • Title:  " . $payload["title"]);
+        $this->line(" • New Instructions: " . $payload["description"]);
+        $this->line(
+            " • Tracks queued for modification updates: " .
+                implode(", ", $payload["content_tracks"]),
+        );
+        $this->line(str_repeat("=", 80));
 
-        foreach ($listItems as $item) {
-            $this->line(" • {$item}");
+        $domainSlug = Str::slug($payload["domain"], "_");
+        $typeSlug = Str::slug($payload["type"], "_");
+        $titleSlug = Str::slug($payload["title"], "_");
+
+        $baseDataStore = base_path("../data/agent/data");
+        $typeDirectory = "{$baseDataStore}/{$domainSlug}/{$typeSlug}";
+
+        if (!is_dir($typeDirectory)) {
+            $this->error(
+                "Cannot update: The core domain/type directory structure does not exist at [{$typeDirectory}].",
+            );
+            return self::FAILURE;
         }
 
-        try {
-            // 1. Resolve and calculate the location of the installed target directory path structure
-            $domain = Str::slug($payload["domain"], "_");
-            $type = Str::slug($payload["type"], "_");
-            $titleSlug = Str::slug($payload["title"], "_");
-
-            $baseDataStore = base_path("../data/agent/data");
-            $typeDirectory = "{$baseDataStore}/{$domain}/{$type}";
-            $targetDirectory = null;
-
-            if (!is_dir($typeDirectory)) {
-                throw new InvalidArgumentException(
-                    "Cannot update: The domain/type directory structure does not exist.",
-                );
-            }
-
-            // Scan historical date-bound tracking trees to find the existing directory matching the title
-            $dateDirectories = array_filter(
-                glob("{$typeDirectory}/*"),
-                "is_dir",
+        // 2. Loop orchestrations across active targets inside the content_tracks array
+        foreach ($payload["content_tracks"] as $trackType) {
+            $this->comment(
+                "🤖 Processing refinement updates for track branch: [{$trackType}]",
             );
-            foreach ($dateDirectories as $dateDir) {
-                if (is_dir("{$dateDir}/{$titleSlug}")) {
-                    $targetDirectory = "{$dateDir}/{$titleSlug}";
-                    break;
+
+            try {
+                // Compile isolated payload details for historical path
+                // generation matches
+                $trackPayload = [
+                    "domain" => $payload["domain"],
+                    "type" => $payload["type"],
+                    "title" => $payload["title"],
+                    "description" => $payload["description"],
+                    "content_track" => $trackType,
+                ];
+
+                // Scan historical date-bound tracking trees to
+                // locate the specific target directory matching the title
+                $targetDirectory = null;
+                $dateDirectories = array_filter(
+                    glob("{$typeDirectory}/*"),
+                    "is_dir",
+                );
+
+                foreach ($dateDirectories as $dateDir) {
+                    if (is_dir("{$dateDir}/{$titleSlug}")) {
+                        $targetDirectory = "{$dateDir}/{$titleSlug}";
+                        break;
+                    }
                 }
-            }
 
-            if (!$targetDirectory) {
-                throw new InvalidArgumentException(
-                    "Cannot update: No installed instance found matching the title '{$payload["title"]}'.",
+                if (!$targetDirectory) {
+                    $this->warn(
+                        "  ⚠ Skipped Sub-process [{$trackType}]: No installed content instance found matching the title '{$payload["title"]}'.",
+                    );
+                    continue;
+                }
+
+                // Extract historical content canvas from file systems
+                // to provide context to refinement agents
+                $masterPath = "{$targetDirectory}/master.md";
+                $currentContent = file_exists($masterPath)
+                    ? file_get_contents($masterPath)
+                    : "";
+
+                // Query the factory layer to load your central
+                // UpdateRefiningWorkflow strategy instance
+                $resolved = $workflowFactory->make(
+                    $trackType,
+                    $isUpdate = true,
                 );
+                $workflow = $resolved["workflow"];
+                $baseSkillKey = $resolved["base_key"];
+
+                $this->info(
+                    "  -> Injecting history context into refinery track via: {$baseSkillKey}",
+                );
+
+                // Run the resolved strategy script execution sequence
+                // cleanly matching the update signature
+                $markdownResult = $workflow->execute(
+                    $baseSkillKey,
+                    $trackPayload,
+                    $targetDirectory,
+                    $currentContent,
+                );
+
+                // Commit reframed output logs straight back to disk nodes safely
+                file_put_contents($masterPath, $markdownResult);
+
+                // Update tracking metrics metadata details payload mapping trace
+                $trackPayload["updated_at"] = now()->toIso8601String();
+                file_put_contents(
+                    "{$targetDirectory}/payload.json",
+                    json_encode(
+                        $trackPayload,
+                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+                    ),
+                );
+
+                $this->info(
+                    "  ✔ Success: Reframed content file saved cleanly at: {$masterPath}",
+                );
+            } catch (InvalidArgumentException $e) {
+                $this->warn(
+                    "  ⚠ Skipped Sub-process [{$trackType}]: " .
+                        $e->getMessage(),
+                );
+                continue;
+            } catch (\Exception $e) {
+                $this->error(
+                    "  ❌ Fatal Track Error [{$trackType}]: " .
+                        $e->getMessage(),
+                );
+                return self::FAILURE;
             }
-
-            // Extract existing content canvas history to provide context mapping to the refinery agents
-            $masterPath = "{$targetDirectory}/master.md";
-            $currentContent = file_exists($masterPath)
-                ? file_get_contents($masterPath)
-                : "";
-
-            // Resolve the update-specific modular strategy through the Factory
-            $workflow = $workflowFactory->make(
-                $payload["type"],
-                $isUpdate = true,
-            );
-
-            // Run the isolated strategy pipeline step logic loops
-            $this->comment("Executing refinement processing pipelines...");
-            $markdownResult = $workflow->execute(
-                $payload,
-                $targetDirectory,
-                $currentContent,
-            );
-
-            // Safely persist updates to target files
-            file_put_contents($masterPath, $markdownResult);
-
-            // Update the structural system metadata tracking footprint array
-            $payload["updated_at"] = now()->toIso8601String();
-            file_put_contents(
-                "{$targetDirectory}/payload.json",
-                json_encode(
-                    $payload,
-                    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
-                ),
-            );
-
-            $this->info(
-                "Success: Multi-agent documentation ecosystem updated and reframed cleanly!",
-            );
-            $this->line(" • Updated Node: {$targetDirectory}/master.md");
-            return self::SUCCESS;
-        } catch (InvalidArgumentException $e) {
-            $this->error("Skipped Process: " . $e->getMessage());
-            return self::FAILURE;
-        } catch (\Exception $e) {
-            $this->error("Fatal Error: " . $e->getMessage());
-            return self::FAILURE;
         }
+
+        $this->line(str_repeat("=", 80));
+        $this->info(
+            "✨ Batch documentation modification update pipeline completed successfully!",
+        );
+        return self::SUCCESS;
     }
 }

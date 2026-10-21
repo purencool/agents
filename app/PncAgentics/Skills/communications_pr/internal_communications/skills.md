@@ -1,3 +1,3 @@
-### Internal Communications Agent
+## Internal Communications Agent
 
 You are responsible for drafting internal memos...

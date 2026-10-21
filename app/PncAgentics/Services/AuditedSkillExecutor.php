@@ -23,7 +23,8 @@ class AuditedSkillExecutor implements SkillExecutorInterface
         $runId = Str::uuid()->toString();
         $startTime = microtime(true);
 
-        // 1. Audit the entry checkpoint and save variables context
+        // Audit the entry checkpoint into the standard
+        // Laravel daily logging stream
         Log::channel("daily")->info(
             "🤖 [AI Skill Init] Run ID: {$runId} | Skill: {$skillKey}",
             [
@@ -32,12 +33,12 @@ class AuditedSkillExecutor implements SkillExecutorInterface
             ],
         );
 
-        // We can capture the fully compiled layout by reflecting into the base executor
-        // or leveraging the unified runtime variables payload array tracking here.
+        // Capture the fully compiled layout parameters into your
+        // dynamic external log directory
         $this->logDetailedPromptTree($runId, $skillKey, $variables);
 
         try {
-            // 2. Pass execution through seamlessly to the base SkillExecutor
+            // Pass execution through seamlessly to the base SkillExecutor
             $result = $this->baseExecutor->execute(
                 $skillKey,
                 $variables,
@@ -46,10 +47,21 @@ class AuditedSkillExecutor implements SkillExecutorInterface
 
             $executionTime = round(microtime(true) - $startTime, 2);
 
-            // 3. Audit successful completion and performance metrics
+            // Audit successful completion and performance metrics
             Log::channel("daily")->info(
                 "✅ [AI Skill Success] Run ID: {$runId} | Time: {$executionTime}s",
             );
+
+            // Trigger an explicit warning if compute/network times exceed 45 seconds
+            if ($executionTime > 45.0) {
+                Log::channel("daily")->warning(
+                    "🚨 [PERFORMANCE WARNING] Run ID: {$runId} | Skill [{$skillKey}] took abnormally long ({$executionTime}s). Verify your local GPU compute availability, context window allocation limits, or VRAM memory states.",
+                    [
+                        "skill" => $skillKey,
+                        "duration_seconds" => $executionTime,
+                    ],
+                );
+            }
 
             $this->logDetailedResponseTree($runId, $skillKey, $result);
 
@@ -57,7 +69,6 @@ class AuditedSkillExecutor implements SkillExecutorInterface
         } catch (\Exception $e) {
             $executionTime = round(microtime(true) - $startTime, 2);
 
-            // Audit execution anomalies clearly with tracking points
             Log::channel("daily")->error(
                 "❌ [AI Skill Failure] Run ID: {$runId} | Time: {$executionTime}s | Error: {$e->getMessage()}",
                 [
@@ -70,17 +81,43 @@ class AuditedSkillExecutor implements SkillExecutorInterface
     }
 
     /**
-     * Writes out the exact input parameters and context to a dedicated AI debug log file.
+     * Helper method to resolve the dynamic file logging path out of the environment.
+     */
+    protected function getDynamicLogPath(): string
+    {
+        // Reads from your exact LOGGING environment variable
+        $customLoggingBase = env("LOGGING");
+
+        if ($customLoggingBase) {
+            $basePathResolved = base_path($customLoggingBase);
+
+            // Auto-create the target logs folder structure if it
+            // doesn't exist yet outside your repo
+            if (!is_dir($basePathResolved)) {
+                mkdir($basePathResolved, 0755, true);
+            }
+
+            return $basePathResolved .
+                DIRECTORY_SEPARATOR .
+                "ai_audit_" .
+                now()->format("Y-m-d") .
+                ".log";
+        }
+
+        // Fallback baseline standard repository pathway
+        return storage_path("logs/ai_audit_" . now()->format("Y-m-d") . ".log");
+    }
+
+    /**
+     * Writes out the exact input parameters and
+     * context to a dedicated AI debug log file.
      */
     protected function logDetailedPromptTree(
         string $runId,
         string $skillKey,
         array $variables,
     ): void {
-        $logPath = storage_path(
-            "logs/ai_audit_" . now()->format("Y-m-d") . ".log",
-        );
-
+        $logPath = $this->getDynamicLogPath();
         $divider = str_repeat("=", 80);
         $timestamp = now()->toDateTimeString();
 
@@ -108,16 +145,15 @@ class AuditedSkillExecutor implements SkillExecutorInterface
     }
 
     /**
-     * Appends the finalized raw content response from the LLM into the same run ID block.
+     * Appends the finalized raw content response from the LLM into the same
+     * run ID block.
      */
     protected function logDetailedResponseTree(
         string $runId,
         string $skillKey,
         string $result,
     ): void {
-        $logPath = storage_path(
-            "logs/ai_audit_" . now()->format("Y-m-d") . ".log",
-        );
+        $logPath = $this->getDynamicLogPath();
         $divider = str_repeat("-", 80);
 
         $logContent = <<<EOT

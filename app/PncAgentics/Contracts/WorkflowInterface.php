@@ -5,9 +5,10 @@ namespace App\PncAgentics\Contracts;
 interface WorkflowInterface
 {
     /**
-     * Executes a specific documentation generation or modification lifecycle sequence.
+     * Executes the multi-agent prompt loops for a specific domain pipeline.
      */
     public function execute(
+        string $baseSkillKey,
         array $payload,
         string $targetDirectory,
         ?string $existingContent = null,

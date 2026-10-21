@@ -3,32 +3,50 @@
 namespace App\PncAgentics\Factory;
 
 use App\PncAgentics\Contracts\WorkflowFactoryInterface;
-use App\PncAgentics\Contracts\WorkflowInterface;
-use App\PncAgentics\Workflows\AiAgentsCreationWorkflow;
-use App\PncAgentics\Workflows\DeveloperDocsCreationWorkflow;
-use App\PncAgentics\Workflows\ProductGuidesCreationWorkflow;
-use App\PncAgentics\Workflows\UpdateRefiningWorkflow;
 use InvalidArgumentException;
 
 class WorkflowFactory implements WorkflowFactoryInterface
 {
-    public function make(
-        string $type,
-        bool $isUpdate = false,
-    ): WorkflowInterface {
-        // If it's an update process, bypass normal generation routes and target the refinement engine
+    /**
+     * Resolves the target workflow strategy along with its
+     * enterprise base namespace key.
+     */
+    public function make(string $type, bool $isUpdate = false): array
+    {
+        // Establish the absolute structural root prefix for your enterprise keys
+        $baseEnterprisePrefix =
+            "sales_marketing.marketing.external_documentation";
+
+        $resolvedBaseKey = "{$baseEnterprisePrefix}.{$type}";
+
+        // Resolve the update workflow strategy immediately if requested
         if ($isUpdate) {
-            return app(UpdateRefiningWorkflow::class);
+            return [
+                "workflow" => app(
+                    \App\PncAgentics\Workflows\UpdateRefiningWorkflow::class,
+                ),
+                "base_key" => $resolvedBaseKey,
+            ];
         }
 
-        // Determine creation strategies based on the category path mapping passed via JSON payload
-        return match ($type) {
-            "ai_agents" => app(AiAgentsCreationWorkflow::class),
-            "developer_docs" => app(DeveloperDocsCreationWorkflow::class),
-            "product_guides" => app(ProductGuidesCreationWorkflow::class),
+        $strategy = match ($type) {
+            "developer_docs",
+            "product_guides",
+            "social_media",
+            "sales_copy",
+            "blog_posts"
+                => app(
+                \App\PncAgentics\Workflows\UniversalDocumentationWorkflow::class,
+            ),
+
             default => throw new InvalidArgumentException(
-                "Unsupported workflow type: [{$type}]",
+                "Unsupported enterprise workflow type: [{$type}]",
             ),
         };
+
+        return [
+            "workflow" => $strategy,
+            "base_key" => $resolvedBaseKey,
+        ];
     }
 }
