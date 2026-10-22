@@ -8,36 +8,18 @@ use InvalidArgumentException;
 class WorkflowFactory implements WorkflowFactoryInterface
 {
     /**
-     * Resolves the target workflow strategy along with its
-     * enterprise base namespace key.
+     * Resolves the standardized Universal content generation workflow for all tracks.
      */
     public function make(string $type, bool $isUpdate = false): array
     {
-        // Establish the absolute structural root prefix for your enterprise keys
-        $baseEnterprisePrefix =
-            "sales_marketing.marketing.external_documentation";
-
-        $resolvedBaseKey = "{$baseEnterprisePrefix}.{$type}";
-
-        // Resolve the update workflow strategy immediately if requested
-        if ($isUpdate) {
-            return [
-                "workflow" => app(
-                    \App\PncAgentics\Workflows\UpdateRefiningWorkflow::class,
-                ),
-                "base_key" => $resolvedBaseKey,
-            ];
-        }
-
-        $strategy = match ($type) {
+        $resolvedBaseKey = match ($type) {
+            "template",
             "developer_docs",
             "product_guides",
             "social_media",
             "sales_copy",
             "blog_posts"
-                => app(
-                \App\PncAgentics\Workflows\UniversalDocumentationWorkflow::class,
-            ),
+                => "sales_marketing.marketing.external_documentation.{$type}",
 
             default => throw new InvalidArgumentException(
                 "Unsupported enterprise workflow type: [{$type}]",
@@ -45,7 +27,9 @@ class WorkflowFactory implements WorkflowFactoryInterface
         };
 
         return [
-            "workflow" => $strategy,
+            "workflow" => app(
+                \App\PncAgentics\Workflows\UniversalDocumentationWorkflow::class,
+            ),
             "base_key" => $resolvedBaseKey,
         ];
     }

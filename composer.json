@@ -14,6 +14,7 @@
         "laravel/tinker": "^3.0",
         "neuron-core/neuron-laravel": "^2.0",
         "owen-it/laravel-auditing": "^14.0",
+        "spatie/fork": "^1.2",
         "twilio/sdk": "^8.12"
     },
     "require-dev": {
