@@ -3,111 +3,87 @@
 namespace App\PncServices\AI;
 
 use App\PncServices\Contracts\AIServiceInterface;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use NeuronAI\Chat\Messages\UserMessage;
+use NeuronAI\RAG\Embeddings\OpenAILikeEmbeddings;
 
 class AIService implements AIServiceInterface
 {
-    protected string $apiKey;
-    protected string $baseUrl;
-    protected string $model;
+    protected OpenAILikeEmbeddings $embeddings;
 
-    public function __construct()
-    {
-        $this->apiKey = config("pncservices.ai.api_key");
-        $this->baseUrl = config("pncservices.ai.base_url");
-        $this->model = config("pncservices.ai.model");
+    public function __construct(
+        protected \App\PncServices\Contracts\LoggingServiceInterface $logger,
+    ) {
+        $this->embeddings = new OpenAILikeEmbeddings(
+            baseUri: config("pncservices.ai.base_url"),
+            key: config("pncservices.ai.api_key"),
+            model: config("pncservices.ai.model"),
+        );
     }
 
     public function complete(string $prompt, array $options = []): string
     {
-        $messages = [];
-
+        $agent = new PncAgent($options);
+        $agent->setThreadId("one-shot");
         if (!empty($options["system"])) {
-            $messages[] = ["role" => "system", "content" => $options["system"]];
+            $agent->setInstructions((string) $options["system"]);
         }
 
-        $messages[] = ["role" => "user", "content" => $prompt];
+        try {
+            $content = $agent
+                ->chat(new UserMessage($prompt))
+                ->getMessage()
+                ->getContent();
 
-        $body = [
-            "model" => $this->model,
-            "messages" => $messages,
-        ];
+            $response = $content ?? "";
 
-        // Map custom runtime generation metrics if passed by workflows
-        if (isset($options["temperature"])) {
-            $body["temperature"] = (float) $options["temperature"];
-        }
-
-        if (isset($options["max_tokens"])) {
-            $body["max_tokens"] = (int) $options["max_tokens"];
-        }
-
-        // --- 1. DYNAMIC COMPUTE TIMEOUT ENGINE ---
-        $timeoutSeconds = (int) env("AI_REQUEST_TIMEOUT", 30);
-
-        $response = Http::withToken($this->apiKey)
-            ->timeout($timeoutSeconds)
-            ->post($this->baseUrl . "/chat/completions", $body);
-
-        if ($response->failed()) {
-            Log::error("AIService: request failed", [
-                "status" => $response->status(),
-                "body" => $response->json(),
+            return $response;
+        } catch (\Throwable $e) {
+            Log::error("AIService::complete — request failed", [
+                "error" => $e->getMessage(),
+                "trace" => $e->getTraceAsString(),
             ]);
-            throw new \RuntimeException(
-                "AI request failed: " . $response->status(),
-            );
+            throw $e;
         }
-
-        return $response->json("choices.0.message.content", "");
     }
 
     public function embed(string $text): array
     {
-        // --- 2. DYNAMIC COMPUTE TIMEOUT ENGINE ---
-        $timeoutSeconds = (int) env("AI_REQUEST_TIMEOUT", 30);
-
-        $response = Http::withToken($this->apiKey)
-            ->timeout($timeoutSeconds)
-            ->post($this->baseUrl . "/embeddings", [
-                "model" => $this->model,
-                "input" => $text,
+        try {
+            $vector = $this->embeddings->embedText($text);
+            return $vector;
+        } catch (\Throwable $e) {
+            Log::error("AIService::embed — request failed", [
+                "error" => $e->getMessage(),
             ]);
-
-        if ($response->failed()) {
-            throw new \RuntimeException(
-                "Embedding request failed: " . $response->status(),
-            );
+            throw $e;
         }
-
-        return $response->json("data.0.embedding", []);
     }
 
+    /**
+     * Fix: Signature updated to have exactly 2 arguments matching AIServiceInterface.
+     */
     public function chat(string $message, array $history = []): string
     {
-        $messages = array_merge($history, [
-            ["role" => "user", "content" => $message],
-        ]);
+        $threadId = "default";
 
-        $timeoutSeconds = (int) env("AI_REQUEST_TIMEOUT", 30);
+        try {
+            $start = microtime(true);
+            $agent = new PncAgent();
+            $content = $agent
+                ->setThreadId($threadId)
+                ->chat(new UserMessage($message))
+                ->getMessage()
+                ->getContent();
 
-        $response = Http::withToken($this->apiKey)
-            ->timeout($timeoutSeconds)
-            ->withHeaders([
-                "Connection" => "keep-alive",
-            ])
-            ->post($this->baseUrl . "/chat/completions", [
-                "model" => $this->model,
-                "messages" => $messages,
+            $response = $content ?? "";
+            return $response;
+        } catch (\Throwable $e) {
+            Log::error("AIService::chat — request failed", [
+                "thread_id" => $threadId,
+                "error" => $e->getMessage(),
             ]);
-
-        if ($response->failed()) {
-            throw new \RuntimeException(
-                "Chat request failed: " . $response->status(),
-            );
+            throw $e;
         }
-
-        return $response->json("choices.0.message.content", "");
     }
 }

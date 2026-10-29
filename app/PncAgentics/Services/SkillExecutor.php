@@ -4,6 +4,7 @@ namespace App\PncAgentics\Services;
 
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Data\SkillOptions;
+use Illuminate\Support\Facades\Log;
 use App\PncServices\Contracts\AIServiceInterface;
 use InvalidArgumentException;
 
@@ -18,7 +19,6 @@ class SkillExecutor implements SkillExecutorInterface
         array $variables = [],
         array $options = [],
     ): string {
-        // --- 1. DETECT CONSOLIDATED GROUP REQUESTS ---
         if (
             str_contains($skillKey, "body_content.batch_draft_engine") ||
             str_contains($skillKey, "body_content.batch_expand_engine")
@@ -26,23 +26,18 @@ class SkillExecutor implements SkillExecutorInterface
             return $this->executeGroupedBlock($skillKey, $variables, $options);
         }
 
-        // Standard single agent path continues identically...
         $filePath = $this->resolveFilePath($skillKey);
         $rawSystemInstructions = $this->loadFileContent($filePath);
         return $this->processLLMCall(
             $skillKey,
             $rawSystemInstructions,
-            $resolvedFileSource = $filePath,
+            $filePath,
             $variables,
             $options,
             false,
         );
     }
 
-    /**
-     * Dynamically aggregates multiple individual sub-agent prompt files
-     * into a single network payload.
-     */
     protected function executeGroupedBlock(
         string $groupKey,
         array $variables,
@@ -164,16 +159,26 @@ class SkillExecutor implements SkillExecutorInterface
             $compiledInstructions,
             $variables,
         );
-
-        return $this->aiService->complete($promptPayload, [
+        $result = $this->aiService->complete($promptPayload, [
             "temperature" => $configOptions->temperature,
             "max_tokens" => $configOptions->maxTokens,
+            "system" => $compiledInstructions,
             "metadata" => [
                 "skill_executed" => $skillKey,
                 "resolved_file" => $source,
                 "is_aggregated" => $isGrouped,
             ],
         ]);
+
+        if (!is_string($result)) {
+            Log::error("🤖 [processLLMCall] Non-string return detected", [
+                "skill" => $skillKey,
+                "type" => gettype($result),
+                "value" => var_export($result, true),
+            ]);
+        }
+
+        return $result;
     }
 
     protected function parsePlaceholders(

@@ -3,8 +3,7 @@
 namespace App\Console\Commands\Pnc;
 
 use App\PncServices\Agent\Data\AgentPayloadData;
-use App\PncAgentics\Contracts\WorkflowFactoryInterface;
-use App\PncServices\Contracts\AgentStoreInterface;
+use App\PncServices\Agent\Actions\ReframeAgentContentAction;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Concurrency;
 use Illuminate\Support\Facades\Log;
@@ -23,17 +22,22 @@ class DataCreation extends Command
     protected $description = "Accepts a JSON payload to batch generate AI assets concurrently with automatic sequential fallback handling using abstracted validation structures";
 
     /**
+     * Inject ReframeAgentContentAction into the constructor.
+     */
+    public function __construct(
+        protected ReframeAgentContentAction $reframeAction,
+    ) {
+        parent::__construct();
+    }
+
+    /**
      * Execute the console command.
      */
-    public function handle(
-        WorkflowFactoryInterface $workflowFactory,
-        AgentStoreInterface $agentStore,
-    ): int {
-        // --- 1. START THE TOTAL RUNTIME TRACKING TIMER ---
+    public function handle(): int
+    {
         $totalJobStart = microtime(true);
 
         try {
-            // --- DELEGATE PARSING AND VALIDATION COMPLETELY TO DTO LAYER ---
             $payloadData = AgentPayloadData::fromJsonString(
                 $this->argument("data"),
             );
@@ -54,67 +58,23 @@ class DataCreation extends Command
         // Assemble the tasks mapping closures array using the strongly-typed DTO values
         $tasks = [];
         foreach ($payloadData->contentTracks as $trackType) {
-            $tasks[$trackType] = function () use (
-                $payloadData,
-                $trackType,
-                $workflowFactory,
-                $agentStore,
-            ) {
-                $trackPayload = [
-                    "domain" => $payloadData->domain,
-                    "type" => $payloadData->type,
-                    "title" => $payloadData->title,
-                    "description" => $payloadData->description,
-                    "content_track" => $trackType,
-                ];
-
-                // Scaffold directory structures tree node safely
-                $targetDirectory = $agentStore->createStructure($trackPayload);
-
-                // Query factory router to load the central documentation workflow instance
-                $resolved = $workflowFactory->make(
+            $tasks[$trackType] = function () use ($payloadData, $trackType) {
+                // Execute the abstracted action wrapper directly
+                $metrics = $this->reframeAction->execute(
                     $trackType,
-                    $isUpdate = false,
-                );
-                $workflow = $resolved["workflow"];
-                $baseSkillKey = $resolved["base_key"];
-
-                // Execute the unified parent agent processing pipeline
-                $markdownResult = $workflow->execute(
-                    $baseSkillKey,
-                    $trackPayload,
-                    $targetDirectory,
+                    $payloadData->toArray(),
                 );
 
-                // Commit output files cleanly across all targeted production channels
-                file_put_contents(
-                    "{$targetDirectory}/master.md",
-                    $markdownResult,
-                );
-
-                if (is_dir("{$targetDirectory}/dev")) {
-                    file_put_contents(
-                        "{$targetDirectory}/dev/master.md",
-                        $markdownResult,
-                    );
-                }
-                if (is_dir("{$targetDirectory}/stage")) {
-                    file_put_contents(
-                        "{$targetDirectory}/stage/master.md",
-                        $markdownResult,
-                    );
-                }
-
-                return "✔ Success: Track [{$trackType}] completed at [{$targetDirectory}].";
+                return "Success: Track [{$trackType}] saved cleanly at [{$metrics["target_directory"]}/master.md] via key [{$metrics["base_skill_key"]}].";
             };
         }
 
-        // Determine the dynamic systemic timeout ceiling out of your environment settings
-        $timeoutCeiling = (int) env("AI_REQUEST_TIMEOUT", 600);
+        // Determine the dynamic systemic timeout ceiling out of your configuration settings
+        $timeoutCeiling = (int) config("pncservices.ai.timeout", 600);
 
         try {
             $this->comment(
-                "🚀 Attempting parallel workflow execution threads (Max process timeout: {$timeoutCeiling}s)...",
+                "Attempting parallel workflow execution threads (Max process timeout: {$timeoutCeiling}s)...",
             );
 
             // Check if the framework environment possesses native concurrency driver capabilities
@@ -124,32 +84,30 @@ class DataCreation extends Command
                 );
             }
 
-            // --- 2. EXTENDED RUNTIME CONCURRENCY VIA RUN OPTION ARRAY PARAMETER ---
             $results = Concurrency::driver("fork")->run(
                 $tasks,
                 $timeoutCeiling,
             );
 
             foreach ($results as $track => $statusText) {
-                $this->info("  -> Parallel Thread {$statusText}");
+                $this->info(" -> Parallel Thread {$statusText}");
             }
         } catch (\Throwable $e) {
-            // --- 3. AUTOMATIC SEQUENTIAL FALLBACK LAYER PASSTHROUGH ---
             $this->warn(
-                "  ⚠ Parallel execution unavailable or timed out: " .
+                " Parallel execution unavailable or timed out: " .
                     $e->getMessage(),
             );
             $this->comment(
-                "🔄 Initiating automatic fallback: Switching cleanly back to standard sequential execution processing...",
+                "Initiating automatic fallback: Switching cleanly back to standard sequential execution processing...",
             );
 
             foreach ($tasks as $trackType => $taskClosure) {
                 $this->comment(
-                    "  -> Synchronously processing track branch: [{$trackType}]...",
+                    " -> Synchronously processing track branch: [{$trackType}]...",
                 );
                 try {
                     $statusText = $taskClosure();
-                    $this->info("     {$statusText}");
+                    $this->info("  {$statusText}");
                 } catch (\Exception $subException) {
                     $this->error(
                         "     ❌ Fallback Track Error [{$trackType}]: " .
@@ -159,11 +117,10 @@ class DataCreation extends Command
             }
         }
 
-        // --- 4. CALCULATE AND COMMIT TOTAL RUNTIME TRANSITS TO LOG FILE ---
         $totalJobDuration = round(microtime(true) - $totalJobStart, 2);
 
         Log::channel("daily")->info(
-            "🏆 [BATCH CREATION COMPLETED] Generation processing completed in {$totalJobDuration}s",
+            "BATCH CREATION COMPLETED] Generation processing completed in {$totalJobDuration}s",
             [
                 "domain" => $payloadData->domain,
                 "title" => $payloadData->title,
@@ -173,7 +130,7 @@ class DataCreation extends Command
 
         $this->line(str_repeat("=", 80));
         $this->info(
-            "✨ Batch documentation creation workflow pipeline completed successfully in {$totalJobDuration}s!",
+            " Batch documentation creation workflow pipeline completed successfully in {$totalJobDuration}s!",
         );
         return self::SUCCESS;
     }

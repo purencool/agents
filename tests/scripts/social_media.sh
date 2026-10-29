@@ -44,7 +44,11 @@ CREATION_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-php artisan pnc:agent:data:creation "${CREATION_PAYLOAD}"
+php -dxdebug.mode=debug \
+    -dxdebug.start_with_request=yes \
+    -dxdebug.client_host=127.0.0.1 \
+    -dxdebug.client_port=9003 \
+    artisan pnc:agent:data:creation "${CREATION_PAYLOAD}"
 echo ""
 
 echo "--------------------------------------------------------------------------------"
@@ -62,7 +66,7 @@ UPDATE_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
+#php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
 echo ""
 
 
@@ -81,7 +85,7 @@ UPDATE_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
+#php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
 echo ""
 
 echo "--------------------------------------------------------------------------------"
@@ -99,7 +103,7 @@ UPDATE_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
+#php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
 echo ""
 
 

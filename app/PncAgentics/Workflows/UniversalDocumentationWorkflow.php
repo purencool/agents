@@ -75,7 +75,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
                 [
                     "section" => $sectionTitle,
                     "content" => $critiqueContent,
-                    "refinement_context" => $refinementContext, // Ensures glossary and hashtags match fish.com modifications
+                    "refinement_context" => $refinementContext,
                 ],
                 ["temperature" => 0.2],
             );
@@ -118,7 +118,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
 
         $masterDraft = "# {$payload["title"]}\n\n{$introduction}\n\n{$bodyCanvas}\n\n## Conclusion\n\n{$conclusion}";
 
-        return $this->executor->execute(
+        $returnOutput = $this->executor->execute(
             "{$baseSkillKey}.review_refinement.formatting_markdown_expert.skills",
             [
                 "content" => $masterDraft,
@@ -126,5 +126,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
             ],
             ["temperature" => 0.1],
         );
+
+        return $returnOutput;
     }
 }
