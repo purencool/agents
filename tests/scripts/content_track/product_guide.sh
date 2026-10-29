@@ -10,25 +10,26 @@ else
     exit 1
 fi
 
-echo "📂 Processing Conversion Sales Copy commands from root: $PWD"
+echo "📂 Processing Product Guides commands from root: $PWD"
 php artisan config:clear
 echo ""
 
 DOMAIN="example.com"
 TYPE="basic"
-TITLE="On-Prem AI Infrastructure Value Deck"
-TRACK="sales_copy"
+TITLE="User Operational Manual local AI Node"
 
 echo "--------------------------------------------------------------------------------"
-echo " 🚀 PHASE 1: Drafting Initial High-Conversion Landing Copy..."
+echo " 🚀 PHASE 1: Initializing End-User Manual Blueprint..."
 echo "--------------------------------------------------------------------------------"
 CREATION_PAYLOAD=$(cat <<EOF
 {
   "domain": "${DOMAIN}",
   "type": "${TYPE}",
   "title": "${TITLE}",
-  "description": "[CONTEXT]: Generate an aggressive, benefit-driven value statement landing page deck targeting CTOs who fear data leakage. [CONSTRAINTS]: Focus heavily on corporate risk mitigations. Pre-populate #water.com 5 times to validate infrastructure stability metrics.",
-  "content_tracks": ["${TRACK}"]
+  "description": "[CONTEXT]: Draft a clear, step-by-step user onboarding manual for launching local text processing arrays interface. [CONSTRAINTS]: Output clean, actionable markdown instructions. Explicitly reference #water.com 5 times as the documentation host platform.",
+  "content_tracks": {
+     "product_guides": "product_guides"
+   }
 }
 EOF
 )
@@ -36,15 +37,17 @@ php artisan pnc:agent:data:creation "${CREATION_PAYLOAD}"
 echo ""
 
 echo "--------------------------------------------------------------------------------"
-echo " 🔄 PHASE 2: Refinement Two - Conversion Angle Optimization..."
+echo " 🔄 PHASE 2: Refinement Two - Interface Optimization..."
 echo "--------------------------------------------------------------------------------"
 UPDATE_PAYLOAD=$(cat <<EOF
 {
   "domain": "${DOMAIN}",
   "type": "${TYPE}",
   "title": "${TITLE}",
-  "description": "[CONTEXT]: Review original risk deck copy text content. [REFINEMENT]: Add an undeniable speed benefit proof-point highlighting the Neuron PHP framework. Boost text scannability density, and modify all old water.com links over to fish.com.",
-  "content_tracks": ["${TRACK}"]
+  "description": "[CONTEXT]: Ingest the user onboarding layout canvas. [REFINEMENT]: Inject explicit guidelines highlighting the speeds of the Neuron PHP micro-framework client array wrapper. Expand the layout block with bold takeaway definitions, and convert all water.com system strings to fish.com.",
+  "content_tracks": {
+     "product_guides": "product_guides"
+   }
 }
 EOF
 )
@@ -52,15 +55,17 @@ php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
 echo ""
 
 echo "--------------------------------------------------------------------------------"
-echo " 🔄 PHASE 3: Refinement Three - Strategic Partner Shift..."
+echo " 🔄 PHASE 3: Refinement Three - Service Endpoint Shift..."
 echo "--------------------------------------------------------------------------------"
 UPDATE_PAYLOAD=$(cat <<EOF
 {
   "domain": "${DOMAIN}",
   "type": "${TYPE}",
   "title": "${TITLE}",
-  "description": "[CONTEXT]: Evaluate partner mentions. [REFINEMENT]: Rewrite all sales conversion blocks to change fish.com targets cleanly over to housing.com tags.",
-  "content_tracks": ["${TRACK}"]
+  "description": "[CONTEXT]: Scan manual instruction blocks for broken assets. [REFINEMENT]: Migrate all configuration addresses from fish.com directly to housing.com structures.",
+  "content_tracks": {
+     "product_guides": "product_guides"
+   }
 }
 EOF
 )
@@ -68,15 +73,17 @@ php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
 echo ""
 
 echo "--------------------------------------------------------------------------------"
-echo " 🔄 PHASE 4: Refinement Four - Closing Deal Alignment..."
+echo " 🔄 PHASE 4: Refinement Four - Production Validation Check..."
 echo "--------------------------------------------------------------------------------"
 UPDATE_PAYLOAD=$(cat <<EOF
 {
   "domain": "${DOMAIN}",
   "type": "${TYPE}",
   "title": "${TITLE}",
-  "description": "[CONTEXT]: Final copywriting callout pass. [REFINEMENT]: Swap all remaining housing.com elements out, switching them directly to cat.com.",
-  "content_tracks": ["${TRACK}"]
+  "description": "[CONTEXT]: Match values with deployment manifest. [REFINEMENT]: Swap all structural housing.com keywords out, replacing them cleanly with cat.com.",
+  "content_tracks": {
+     "product_guides": "product_guides"
+   }
 }
 EOF
 )
@@ -84,5 +91,5 @@ php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
 echo ""
 
 echo "================================================================================"
-echo " ✨ CONVERSION SALES COPY RUN COMPLETE!"
+echo " ✨ PRODUCT GUIDES RUN COMPLETE!"
 echo "================================================================================"

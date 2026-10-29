@@ -27,7 +27,6 @@ echo ""
 DOMAIN="example.com"
 TYPE="basic"
 TITLE="Enterprise Local Processing"
-TRACK="social_media"
 
 echo "--------------------------------------------------------------------------------"
 echo " Launching Multi-Agent Batch Creation Command..."
@@ -39,7 +38,9 @@ CREATION_PAYLOAD=$(cat <<EOF
   "type": "${TYPE}",
   "title": "${TITLE}",
   "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact, mention #water.com 5 times, and explicitly promote them as the master service provider.",
-  "content_tracks": ["${TRACK}"]
+  "content_tracks": {
+     "social": "social_media"
+   }
 }
 EOF
 )
@@ -61,7 +62,9 @@ UPDATE_PAYLOAD=$(cat <<EOF
   "type": "${TYPE}",
   "title": "${TITLE}",
   "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact. [REFINEMENT]: Please integrate deep support mentions for the Neuron PHP framework. Expand structural text density to safely clear a strict 300 character count limit threshold constraint. Also replace water.com references with fish.com instead.",
-  "content_tracks": ["${TRACK}"]
+  "content_tracks": {
+     "social": "social_media"
+   }
 }
 EOF
 )
@@ -80,7 +83,9 @@ UPDATE_PAYLOAD=$(cat <<EOF
   "type": "${TYPE}",
   "title": "${TITLE}",
   "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact. [REFINEMENT]: Update all fishing.com to housing.com.",
-  "content_tracks": ["${TRACK}"]
+  "content_tracks": {
+     "social": "social_media"
+   }
 }
 EOF
 )
@@ -98,7 +103,9 @@ UPDATE_PAYLOAD=$(cat <<EOF
   "type": "${TYPE}",
   "title": "${TITLE}",
   "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact. [REFINEMENT]: Update all housing.com to cat.com.",
-  "content_tracks": ["${TRACK}"]
+  "content_tracks": {
+     "social": "social_media"
+   }
 }
 EOF
 )

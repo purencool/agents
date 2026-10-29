@@ -3,22 +3,35 @@
 namespace App\Console\Commands\Pnc;
 
 use App\PncServices\Agent\Data\AgentPayloadData;
-use App\PncServices\Agent\Actions\ReframeAgentContentAction;
+use App\PncTemplates\Actions\ReframeAgentContentAction;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 class DataUpdate extends Command
 {
+    /**
+     * The name and signature of the console command.
+     */
     protected $signature = "pnc:agent:data:update {data : The raw JSON string object}";
+
+    /**
+     * The console command description.
+     */
     protected $description = "Accepts a JSON payload to batch reframe, rewrite, and update existing target content track files using abstracted validation structures";
 
+    /**
+     * Inject ReframeAgentContentAction from the PncTemplates space.
+     */
     public function __construct(
         protected ReframeAgentContentAction $reframeAction,
     ) {
         parent::__construct();
     }
 
+    /**
+     * Execute the console command.
+     */
     public function handle(): int
     {
         $totalJobStart = microtime(true);
@@ -37,16 +50,20 @@ class DataUpdate extends Command
         $this->line(" • Title:  " . $payloadData->title);
         $this->line(str_repeat("=", 80));
 
-        // Iterate across the requested content track threads using strongly-typed properties
-        foreach ($payloadData->contentTracks as $trackType) {
+        // Fix: Iterate across associative key/value pairs matching your updated payload structure
+        foreach (
+            $payloadData->contentTracks
+            as $trackName => $templateFilename
+        ) {
             $this->comment(
-                "🤖 Processing refinement updates for track branch: [{$trackType}]",
+                "🤖 Processing refinement updates for track branch: [{$trackName}] via layout [{$templateFilename}]",
             );
 
             try {
-                // Pass array variant straight down into legacy backend storage engine loop nodes safely
+                // Fix: Updated parameters match the signature required by the new Action node
                 $metrics = $this->reframeAction->execute(
-                    $trackType,
+                    $trackName,
+                    $templateFilename,
                     $payloadData->toArray(),
                 );
 
@@ -63,14 +80,13 @@ class DataUpdate extends Command
                 );
             } catch (InvalidArgumentException $e) {
                 $this->warn(
-                    "  ⚠ Skipped Sub-process [{$trackType}]: " .
+                    "  ⚠ Skipped Sub-process [{$trackName}]: " .
                         $e->getMessage(),
                 );
                 continue;
             } catch (\Exception $e) {
                 $this->error(
-                    "  ❌ Fatal Track Error [{$trackType}]: " .
-                        $e->getMessage(),
+                    " ❌ Fatal Track Error [{$trackName}]: " . $e->getMessage(),
                 );
                 return self::FAILURE;
             }

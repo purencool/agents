@@ -1,0 +1,11 @@
+{
+  "type": "blog_post",
+  "system_prompt": "You are a headless blog parsing engine. Segment the raw markdown document body into headless fields.",
+  "elements_map": {
+    "title": { "selector": "#", "description": "The primary main article title." },
+    "element1": { "selector": "## Introduction", "description": "The introductory narrative text." },
+    "element2": { "selector": "## Core Content", "description": "The main technical tutorial or breakdown sections." },
+    "element4": { "selector": "## Conclusion", "description": "The closing wrap-up takeaways summary text." }
+  },
+  "options": { "temperature": 0.1, "max_tokens": 3500 }
+}

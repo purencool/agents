@@ -23,49 +23,37 @@ class AgentPayloadData
      * @return self
      * @throws InvalidArgumentException
      */
-    public static function fromJsonString(string $jsonString): self
+    public static function fromJsonString(string $json): self
     {
-        $payload = json_decode($jsonString, true);
-
-        // Validate JSON Format Syntax
-        if (json_last_error() !== JSON_ERROR_NONE || !is_array($payload)) {
+        $data = json_decode($json, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
             throw new InvalidArgumentException(
-                "Invalid input: The provided string is not valid JSON. Error: " .
+                "Invalid incoming payload JSON mapping syntax: " .
                     json_last_error_msg(),
             );
         }
 
-        // Enforce Strict Field Validation Matching Structural Matrix
-        $validator = Validator::make($payload, [
-            "domain" => "required|string",
-            "type" => "required|string",
-            "title" => "required|string",
-            "description" => "required|string",
-            "content_tracks" => "required|array|min:1",
-            "content_tracks.*" => "required|string",
-        ]);
-
-        if ($validator->fails()) {
-            $errorSummary = implode(", ", $validator->errors()->all());
-            throw new InvalidArgumentException(
-                "Validation Failed: {$errorSummary}",
-            );
+        // Enforce safety baselines
+        foreach (
+            ["domain", "type", "title", "description", "content_tracks"]
+            as $field
+        ) {
+            if (empty($data[$field])) {
+                throw new InvalidArgumentException(
+                    "Missing critical structural request property: [{$field}]",
+                );
+            }
         }
 
-        // Return Strongly-Typed Instance Map
         return new self(
-            domain: (string) $payload["domain"],
-            type: (string) $payload["type"],
-            title: (string) $payload["title"],
-            description: (string) $payload["description"],
-            contentTracks: (array) $payload["content_tracks"],
+            domain: (string) $data["domain"],
+            type: (string) $data["type"],
+            title: (string) $data["title"],
+            description: (string) $data["description"],
+            contentTracks: (array) $data["content_tracks"],
         );
     }
 
-    /**
-     * Converts the strongly-typed properties back into an
-     * array for legacy action support.
-     */
     public function toArray(): array
     {
         return [

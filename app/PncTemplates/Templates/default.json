@@ -1,0 +1,9 @@
+{
+  "type": "default",
+  "system_prompt": "You are a headless text parsing engine. Segment the raw markdown document body into headless fields.",
+  "elements_map": {
+    "title": { "selector": "#", "description": "The primary main article title." },
+    "body": { "selector": "", "description": "Put all content into the body." }
+  },
+  "options": { "temperature": 0.3, "max_tokens": 2000 }
+}

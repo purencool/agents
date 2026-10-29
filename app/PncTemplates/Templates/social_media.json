@@ -1,0 +1,11 @@
+{
+  "type": "social_media",
+  "system_prompt": "You are a social media copywriter. Break the provided text down into discrete elements for platform publishing channels.",
+  "elements_map": {
+    "title": { "selector": "Hook", "description": "The opening attention-grabbing headline line." },
+    "element1": { "selector": "LinkedIn Post", "description": "The professional, detailed narrative chunk optimized for LinkedIn." },
+    "element2": { "selector": "X Thread", "description": "Short micro-blogging snippets split cleanly into sentences." },
+    "element4": { "selector": "Hashtags", "description": "An isolated group block of high-traffic content tags." }
+  },
+  "options": { "temperature": 0.3, "max_tokens": 2000 }
+}

@@ -23,11 +23,11 @@ echo ""
 
 # Explicitly list out the child testing tracks exactly matching your filenames
 test_scripts=(
-    "blog_posts.sh"
-    "developer_documentation.sh"
-    "product_guide.sh"
-    "sales_copy.sh"
-    "social_media.sh"
+    "content_track/blog_posts.sh"
+    "content_track/developer_documentation.sh"
+    "content_track/product_guide.sh"
+    "content_track/sales_copy.sh"
+    "content_track/social_media.sh"
 )
 
 for script in "${test_scripts[@]}"; do
