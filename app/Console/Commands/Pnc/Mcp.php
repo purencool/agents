@@ -7,7 +7,7 @@ use App\PncAgentics\Tools\McpClient;
 
 class Mcp extends Command
 {
-    protected $signature = 'pnc:mcp {--tool= : Test a specific tool} {--input= : Test input} {--all : Test all tools}';
+    protected $signature = 'pnc:mcp {--tool= : Test a specific tool} {--input= : Test input} {--all : Test all tools} {--save= : Save output to this path (HTML for web-fetch, JSON otherwise)}';
     protected $description = 'Test MCP server connection and list available tools';
 
     public function handle(McpClient $client): int
@@ -60,6 +60,39 @@ class Mcp extends Command
                 $this->warn("⚠️  {$toolName} ({$elapsed}ms)");
             }
             $this->line(json_encode($result['data'], JSON_PRETTY_PRINT));
+
+            // ─── Save output ───
+            if ($this->option('save')) {
+                $savePath = $this->option('save');
+                $dir = dirname($savePath);
+                if (!is_dir($dir)) mkdir($dir, 0755, true);
+
+                // For web-fetch: save raw HTML + JSON
+                if ($toolName === 'web-fetch' && isset($result['data']['data'])) {
+                    // Re-fetch to get raw HTML (the client returns parsed JSON)
+                    // Save the JSON response
+                    $jsonPath = preg_replace('/\.html?$/', '.json', $savePath);
+                    file_put_contents($jsonPath, json_encode($result['data'], JSON_PRETTY_PRINT));
+                    $this->info("Saved JSON: {$jsonPath}");
+
+                    // Also save the HTML by calling the raw endpoint
+                    $htmlPath = $savePath;
+                    if (preg_match('/\.json$/', $savePath)) {
+                        $htmlPath = preg_replace('/\.json$/', '.html', $savePath);
+                    }
+                    // Fetch raw HTML for saving
+                    $rawResult = $client->call('http', "GET {$input}");
+                    if (isset($rawResult['data']['body'])) {
+                        file_put_contents($htmlPath, is_string($rawResult['data']['body']) ? $rawResult['data']['body'] : json_encode($rawResult['data']['body'], JSON_PRETTY_PRINT));
+                        $this->info("Saved HTML: {$htmlPath}");
+                    }
+                } else {
+                    // For all other tools: save JSON
+                    file_put_contents($savePath, json_encode($result['data'], JSON_PRETTY_PRINT));
+                    $this->info("Saved: {$savePath}");
+                }
+            }
+
             return $ok ? self::SUCCESS : self::FAILURE;
         }
 
@@ -85,7 +118,7 @@ class Mcp extends Command
             return $failed === 0 ? self::SUCCESS : self::FAILURE;
         }
 
-        // ─── Default: list all tools from help ───
+        // ─── Default: list all tools ───
         $this->line("Available tools:");
         $this->newLine();
 
@@ -95,6 +128,7 @@ class Mcp extends Command
 
         $this->newLine();
         $this->info("Use --tool=<name> --input=<value> to test a specific tool.");
+        $this->info("Use --save=<path> to save output to a file.");
         $this->info("Use --all to test every tool.");
 
         return self::SUCCESS;
