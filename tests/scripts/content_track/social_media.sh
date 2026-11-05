@@ -1,118 +1,49 @@
 #!/usr/bin/env bash
 
-# Exit immediately if a command exits with a non-zero status
 set -e
 
-# Check if the script is running from inside the tests/scripts directory
-# If it is, jump back up to the main application root directory seamlessly
-if [[ "$PWD" == */tests/scripts ]]; then
-    cd ../../
-elif [ -d "tests/scripts" ] && [ -f "artisan" ]; then
-    # Already at the application root, proceeding safely
-    true
-else
-    echo "❌ Error: Could not accurately locate the Laravel framework application root."
-    exit 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$SCRIPT_DIR"
+while [ ! -f "$ROOT/artisan" ]; do
+    ROOT="$(cd "$ROOT/.." && pwd)"
+done
+cd "$ROOT"
+
+CONFIG="${SCRIPT_DIR}/social_media.json"
+CONFIG_UPDATE="${SCRIPT_DIR}/social_media_update.json"
+TITLE="${1:-Test Document}"
+DEBUG=""
+
+if [[ "$2" == "--debug" ]]; then
+    DEBUG="1"
 fi
 
-echo "📂 Processing commands from application root directory path: $PWD"
+echo "========================================"
+echo "  Agent Data Creation"
+echo "========================================"
+echo " Config:  $CONFIG"
+echo " Title:   $TITLE"
+echo " Debug:   ${DEBUG:-off}"
+echo "========================================"
 echo ""
 
-# Clear application optimization cache registers before starting
-echo "🧹 Flushing application optimization caching state maps..."
-php artisan config:clear
-echo ""
-
-# Define unique testing variables
-DOMAIN="example.com"
-TYPE="basic"
-TITLE="Enterprise Local Processing"
-
-echo "--------------------------------------------------------------------------------"
-echo " Launching Multi-Agent Batch Creation Command..."
-echo "--------------------------------------------------------------------------------"
-
-CREATION_PAYLOAD=$(cat <<EOF
-{
-  "domain": "${DOMAIN}",
-  "type": "${TYPE}",
-  "title": "${TITLE}",
-  "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact, mention #water.com 5 times, and explicitly promote them as the master service provider.",
-  "content_tracks": {
-     "social": "social_media"
-   }
-}
-EOF
-)
-
-php -dxdebug.mode=debug \
-    -dxdebug.start_with_request=yes \
-    -dxdebug.client_host=127.0.0.1 \
-    -dxdebug.client_port=9003 \
-    artisan pnc:agent:data:creation "${CREATION_PAYLOAD}"
-echo ""
+# ─── Run ───
+if [ -n "$DEBUG" ]; then
+    php -dxdebug.mode=debug \
+        -dxdebug.start_with_request=yes \
+        -dxdebug.client_host=127.0.0.1 \
+        -dxdebug.client_port=9003 \
+        artisan pnc:agent:data:creation "$(cat "$CONFIG")"
+else
+    #strace php artisan pnc:agent:data:creation "$(cat "$CONFIG")"
+    php artisan pnc:agent:data:creation "$(cat "$CONFIG")"
+fi
 
 echo "--------------------------------------------------------------------------------"
-echo " Triggering Refinery Update Command over Historical Canvas..."
+echo " Triggering Refinery Update Command over Historical Content..."
 echo "--------------------------------------------------------------------------------"
 
-UPDATE_PAYLOAD=$(cat <<EOF
-{
-  "domain": "${DOMAIN}",
-  "type": "${TYPE}",
-  "title": "${TITLE}",
-  "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact. [REFINEMENT]: Please integrate deep support mentions for the Neuron PHP framework. Expand structural text density to safely clear a strict 300 character count limit threshold constraint. Also replace water.com references with fish.com instead.",
-  "content_tracks": {
-     "social": "social_media"
-   }
-}
-EOF
-)
-
-#php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
-echo ""
-
-
-echo "--------------------------------------------------------------------------------"
-echo " Triggering Refinery Update Command over Historical test three."
-echo "--------------------------------------------------------------------------------"
-
-UPDATE_PAYLOAD=$(cat <<EOF
-{
-  "domain": "${DOMAIN}",
-  "type": "${TYPE}",
-  "title": "${TITLE}",
-  "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact. [REFINEMENT]: Update all fishing.com to housing.com.",
-  "content_tracks": {
-     "social": "social_media"
-   }
-}
-EOF
-)
-
-#php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
-echo ""
-
-echo "--------------------------------------------------------------------------------"
-echo " Triggering Refinery Update Command over Historical test four."
-echo "--------------------------------------------------------------------------------"
-
-UPDATE_PAYLOAD=$(cat <<EOF
-{
-  "domain": "${DOMAIN}",
-  "type": "${TYPE}",
-  "title": "${TITLE}",
-  "description": "[CONTEXT]: Write an engaging analysis on why deploying local open-source LLMs protects private corporate codebases. [CONSTRAINTS]: Keep the initial outline structures compact. [REFINEMENT]: Update all housing.com to cat.com.",
-  "content_tracks": {
-     "social": "social_media"
-   }
-}
-EOF
-)
-
-#php artisan pnc:agent:data:update "${UPDATE_PAYLOAD}"
-echo ""
-
+#php artisan pnc:agent:data:update "$(catCONFIG_UPDATE)"
 
 echo "================================================================================"
 echo " SYSTEM INTEGRATION VALIDATION TEST RUN COMPLETE!"

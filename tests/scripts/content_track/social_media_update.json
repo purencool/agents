@@ -1,0 +1,21 @@
+{
+  "title": "This a title about water",
+  "description": "[CONTEXT]: Write an engaging analysis...OOOO this needs to be updated",
+  "uuid": "",
+  "domains":{
+  "example.com": {
+    "typeone":   { "content_tracks": { "config": {"type": "social", "template":"social", "track": "social_media", "lang": "en, ru"} } },
+    "typetwo":   { "content_tracks":  { "config": {"type": "social", "template":"social", "track": "social_media", "lang": "en"} } },
+    "typethree": { "content_tracks":  { "config": {"type": "social", "template":"social", "track": "social_media", "lang": "en"} } }
+  },
+  "house.au": {
+    "sales":  { "content_tracks":  { "config": {"type": "social", "template":"social", "track": "social_media", "lang": "en"} } }
+  },
+  "blog.com": {
+    "blog":     { "content_tracks":  { "config": {"type": "social", "template":"social", "track": "social_media", "lang": "en"} } }
+  },
+  "meeting.com": {
+    "meeting":   { "content_tracks":  { "config": {"type": "social", "template":"social", "track": "social_media", "lang": "en"} } }
+  }
+ }
+}

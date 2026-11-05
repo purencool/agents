@@ -4,10 +4,16 @@ namespace App\PncAgentics\Workflows;
 
 use App\PncAgentics\Contracts\WorkflowInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
+use App\PncAgentics\Contracts\McpToolServiceInterface;
+use App\PncAgentics\Contracts\FileSaverInterface;
 
 class UniversalDocumentationWorkflow implements WorkflowInterface
 {
-    public function __construct(protected SkillExecutorInterface $executor) {}
+    public function __construct(
+        protected SkillExecutorInterface $executor,
+        protected McpToolServiceInterface $mcp,
+        protected FileSaverInterface $saver,
+    ) {}
 
     public function execute(
         string $baseSkillKey,
@@ -16,6 +22,10 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
         ?string $existingContent = null,
     ): string {
         $refinementContext = $existingContent ?? "";
+
+        $gatherer = new ResearchGatherer($this->mcp, $this->saver);
+        $researchContext = $gatherer->gather($payload, $targetDirectory);
+        $refinementContext .= "\n\n## Research Findings\n" . $researchContext;
         $rawOutline = $this->executor->execute(
             "{$baseSkillKey}.research_preparation.outline_generator.skills",
             array_merge($payload, ["refinement_context" => $refinementContext]),
@@ -36,7 +46,6 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
         $cleanJson = preg_replace("/```json\s*|```/", "", $sectionsJson);
         $cleanJson = trim($cleanJson);
         $sections = json_decode($cleanJson, true) ?: [$payload["title"]];
-
         $bodyCanvas = "";
 
         foreach ($sections as $sectionTitle) {
@@ -126,6 +135,9 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
             ],
             ["temperature" => 0.1],
         );
+
+        $this->saver->setPath($targetDirectory);
+        $this->saver->saveMarkdown($returnOutput, "master");
 
         return $returnOutput;
     }

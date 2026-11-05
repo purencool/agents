@@ -13,7 +13,6 @@ class WorkflowFactory implements WorkflowFactoryInterface
     public function make(string $type, bool $isUpdate = false): array
     {
         $resolvedBaseKey = match ($type) {
-            "template",
             "developer_docs",
             "product_guides",
             "social_media",
