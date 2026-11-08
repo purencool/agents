@@ -1,9 +1,8 @@
 #!/bin/bash
-# tests/scripts/mcp.sh — Test all search tools and driver variations via pnc:mcp
+# Test all search tools and driver variations via pnc:mcp
 
 set -e
 
-# Resolve project root from this script's location (tests/scripts/ → ../../)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 

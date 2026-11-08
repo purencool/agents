@@ -11,6 +11,7 @@
 !/config/
 !/resources/
 !/routes/
+!/scripts/
 !/tests/
 
 # Core Root Files

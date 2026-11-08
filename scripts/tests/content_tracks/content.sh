@@ -1,55 +1,54 @@
 #!/usr/bin/env bash
-
-# Exit immediately if any sub-script fails unexpectedly
 set -e
 
-# Capture the script's home location so it executes perfectly from anywhere
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Track the master global stopwatch timer
-GLOBAL_START_TIME=$(date +%s)
+TARGET="${1:-all}"
 
-# Clear terminal screen output for pristine logging readability
+declare -A TRACKS=(
+    ["blog_posts"]="blog_posts/blog_posts.sh"
+    ["developer"]="developer/developer_documentation.sh"
+    ["product_guide"]="product_guide/product_guide.sh"
+    ["sales_copy"]="sales_copy/sales_copy.sh"
+    ["social_media"]="social_media/social_media.sh"
+)
+
+if [ "$TARGET" = "all" ]; then
+    test_scripts=("${TRACKS[@]}")
+elif [ -n "${TRACKS[$TARGET]+x}" ]; then
+    test_scripts=("${TRACKS[$TARGET]}")
+else
+    echo "Usage: $0 {blog_posts|developer|product_guide|sales_copy|social_media|all}"
+    exit 1
+fi
+
+GLOBAL_START_TIME=$(date +%s)
 clear
 
 echo "================================================================================"
-echo "PNC ENTERPRISE AGENT ENGINE: FULL PIPELINE TESTING SUITE"
+echo "PNC ENTERPRISE AGENT ENGINE: PIPELINE TESTING SUITE"
 echo "================================================================================"
 echo " Execution Directory: $PWD"
+echo " Target: $TARGET"
 echo " Started At: $(date)"
-echo "============ ===================================================================="
+echo "================================================================================"
 echo ""
-
-# Explicitly list out the child testing tracks exactly matching your filenames
-test_scripts=(
-    "content_track/blog_posts.sh"
-    "content_track/developer_documentation.sh"
-    "content_track/product_guide.sh"
-    "content_track/sales_copy.sh"
-    "content_track/social_media.sh"
-)
 
 for script in "${test_scripts[@]}"; do
     echo "================================================================================"
     echo " QUEUING COMPONENT: [ $script ]"
     echo "================================================================================"
 
-    # Verify the child script exists and is executable before spinning threads
     if [ -f "$script" ]; then
         chmod +x "$script"
-
         TRACK_START_TIME=$(date +%s)
-
-        # Execute the child shell script directly in the current terminal output matrix
         ./"$script"
-
         TRACK_END_TIME=$(date +%s)
         TRACK_DURATION=$((TRACK_END_TIME - TRACK_START_TIME))
-
         echo " Component [ $script ] finished cleanly in ${TRACK_DURATION}s."
     else
-        echo "❌ Critical Error: Target script asset [ $script ] not found on disk!"
+        echo "Critical Error: Target script asset [ $script ] not found on disk!"
         exit 1
     fi
     echo ""
@@ -61,6 +60,6 @@ GLOBAL_DURATION=$((GLOBAL_END_TIME - GLOBAL_START_TIME))
 echo "================================================================================"
 echo " GLOBAL SUITE METRICS: WORKFLOWS PASSED CLEANLY"
 echo "================================================================================"
-echo " Total processing duration across all 5 tracks: ${GLOBAL_DURATION}s"
+echo " Total duration ($TARGET): ${GLOBAL_DURATION}s"
 echo " Version history snapshot stacks are fully populated on disk."
 echo "================================================================================"

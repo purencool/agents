@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_PATH="${SCRIPT_DIR}/../../.env"
+ENV_PATH="${SCRIPT_DIR}/../../../.env"
 
 echo " Parsing configuration maps from .env file..."
 

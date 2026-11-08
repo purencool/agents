@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+COMMAND="${1:-help}"
+
+case "$COMMAND" in
+    csm)
+        bash ./tests/ontent_tracks/content.sh social_media
+        ;;
+    call)
+        bash ./tests/content_tracks/content.sh all
+        ;;
+    end)
+        bash ./tests/end_point/endpoint.sh
+        ;;
+    mcp)
+        bash ./tests/mcp/mcp.sh
+        ;;
+    tests)
+        bash ./tests/code/tests.sh "${2:-tests}"
+        ;;
+    help|*)
+        echo "Usage: bash ./scripts/manage <command>"
+        echo ""
+        echo "Available commands:"
+        echo "  csm       - Run social_media track tests to see if it is work correctly"
+        echo "  call      - Run all content tracks tests so that automation can be pushed"
+        echo "  end       - See if llm endpoint is working with a response and question"
+        echo "  tests     - Run all tests in PhpUnit or test <foo> for single test"
+        echo "  mcp       - Reaching out to the mcp server and see all possible tools"
+        echo "  help      - Show this message"
+        ;;
+esac
