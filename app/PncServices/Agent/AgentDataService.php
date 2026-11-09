@@ -9,6 +9,12 @@ use App\PncServices\Agent\Actions\WorkFlowAgentContentAction;
 use App\PncServices\Agent\Actions\TemplateAgentContentAction;
 use App\PncServices\Agent\Actions\SaveAgentContentAction;
 
+/**
+ * Orchestrates the full agent content creation pipeline.
+ *
+ * Delegates each pipeline stage to a dedicated Action class:
+ * structure → template → research → workflow → save.
+ */
 class AgentDataService implements AgentDataInterface
 {
     public function __construct(
@@ -21,6 +27,18 @@ class AgentDataService implements AgentDataInterface
 
     /**
      * Verifies and generates the agent filesystem hierarchy.
+     *
+     * @param array{
+     *     title: string,
+     *     description: string,
+     *     domains: array<string, array<string, array{content_tracks: array{config: array}}>>
+     * } $data Validated payload containing title, description, and domain/track config.
+     *
+     * @return array{
+     *     uuid: string,
+     *     paths: array<string, string>,
+     *     tracks: array<string, array>
+     * } Generated structure with UUID, filesystem paths, and track file mappings.
      */
     public function createStructure(array $data): array
     {
@@ -29,6 +47,10 @@ class AgentDataService implements AgentDataInterface
 
     /**
      * Runs research content generation for the given structure.
+     *
+     * @param array $structure Return value from {@see self::createStructure()}.
+     *
+     * @return array<string, array> Results keyed by track identifier.
      */
     public function runResearch(array $structure): array
     {
@@ -37,6 +59,10 @@ class AgentDataService implements AgentDataInterface
 
     /**
      * Executes the full workflow pipeline for the given structure.
+     *
+     * @param array $structure Return value from {@see self::createStructure()}.
+     *
+     * @return array<string, array> Results keyed by track identifier.
      */
     public function runWorkFlow(array $structure): array
     {
@@ -45,6 +71,10 @@ class AgentDataService implements AgentDataInterface
 
     /**
      * Applies template-based content generation to the given structure.
+     *
+     * @param array $structure Return value from {@see self::createStructure()}.
+     *
+     * @return array<string, array> Results keyed by track identifier.
      */
     public function applyTemplate(array $structure): array
     {
@@ -52,7 +82,11 @@ class AgentDataService implements AgentDataInterface
     }
 
     /**
-     * Applies save content generation to the given structure.
+     * Persists generated content to the filesystem.
+     *
+     * @param array $structure Return value from {@see self::createStructure()}.
+     *
+     * @return array<string, array> Results keyed by track identifier.
      */
     public function save(array $structure): array
     {
@@ -60,23 +94,39 @@ class AgentDataService implements AgentDataInterface
     }
 
     /**
-     * Convenience: runs the full pipeline (structure → template → research → workflow) in sequence.
+     * Runs the full pipeline (structure → template → research → workflow → save) in sequence.
+     *
+     * @param array{
+     *     title: string,
+     *     description: string,
+     *     domains: array<string, array<string, array{content_tracks: array{config: array}}>>
+     * } $data Validated payload.
+     *
+     * @return array{
+     *     structure: array{
+     *         uuid: string,
+     *         paths: array<string, string>,
+     *         tracks: array<string, array>
+     *     }
+     * } Combined results from all pipeline stages.
+     *
+     * @todo Uncomment and wire up remaining stages (research, workflow, template, save).
      */
     public function executeFullCreationPipeline(array $data): array
     {
         $structure = $this->createStructure($data);
 
         // $research = $this->runResearch($structure);
-        //  $workFlow = $this->runWorkFlow($structure);
-        //  $template = $this->applyTemplate($structure);
-        //  $save = $this->applySave($template);
+        // $workFlow = $this->runWorkFlow($structure);
+        // $template = $this->applyTemplate($structure);
+        // $save     = $this->save($template);
 
         return [
             "structure" => $structure,
-            //    "research" => $research,
-            //     "template" => $template,
-            //    "work_flow" => $workFlow,
-            // "save" => $save,
+            // "research"  => $research,
+            // "template"  => $template,
+            // "work_flow" => $workFlow,
+            // "save"      => $save,
         ];
     }
 }

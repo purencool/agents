@@ -6,43 +6,85 @@ use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
- * Creates the full directory and file structure for a multi-domain, multi-type, multi-language
- * content generation request.
+ * Creates the full directory and file structure for a multi-domain,
+ * multi-type, multi-language content generation request.
  *
  * Resulting structure:
  *
  * {baseDataStore}/
- * ├── domains/2026/{uuid}/2026_11_04_143052/
+ * ├── domains/{year}/{uuid}/{dateTime}/
  * │   ├── assets/
- * │   ├── example_com-test_document-typeone-en-content.json
- * │   ├── example_com-test_document-typeone-en-content.md
- * │   ├── example_com-test_document-typeone-en-description.md
- * │   ├── example_com-test_document-typeone-ru-content.json
- * │   ├── example_com-test_document-typeone-ru-content.md
- * │   ├── example_com-test_document-typeone-ru-description.md
- * │   ├── example_com-test_document-typetwo-en-content.json
- * │   ├── example_com-test_document-typetwo-en-content.md
- * │   ├── example_com-test_document-typetwo-en-description.md
- * │   ├── house_au-test_document-sales-en-content.json
- * │   ├── house_au-test_document-sales-en-content.md
- * │   ├── house_au-test_document-sales-en-description.md
- * │   ├── blog_com-test_document-blog-en-content.json
- * │   ├── blog_com-test_document-blog-en-content.md
- * │   ├── blog_com-test_document-blog-en-description.md
- * │   ├── meeting_com-test_document-meeting-en-content.json
- * │   ├── meeting_com-test_document-meeting-en-content.md
- * │   └── meeting_com-test_document-meeting-en-description.md
- * └── research/2026/{uuid}/2026_11_04_143052/
+ * │   ├── {domainSlug}-{titleSlug}-{typeSlug}-{lang}-content.json
+ * │   ├── {domainSlug}-{titleSlug}-{typeSlug}-{lang}-content.md
+ * │   ├── {domainSlug}-{titleSlug}-{typeSlug}-{lang}-description.md
+ * │   └── ...
+ * └── research/{year}/{uuid}/{dateTime}/
  *     └── research.json
- *
- * Naming convention: {domainSlug}-{titleSlug}-{typeSlug}-{lang}-content.json|.md
- *                    {domainSlug}-{titleSlug}-{typeSlug}-{lang}-description.md
  *
  * The UUID is shared between domains/ and research/ for cross-referencing.
  * Each comma-separated language in a track's "lang" field produces its own file set.
+ *
+ * @see \App\PncServices\Contracts\AgentDataInterface::createStructure()
  */
 class CreateAgentStructureAction
 {
+    /**
+     * Base filesystem path where agent data is stored.
+     *
+     * Resolved to {project_root}/../data/agents/data at runtime.
+     */
+    protected string $basePath;
+
+    public function __construct()
+    {
+        $this->basePath = base_path("../data/agents/data");
+    }
+
+    /**
+     * Builds the full directory tree and seed files for the given payload.
+     *
+     * For each domain → type → language combination, three files are created:
+     *   - content.json   (structured metadata + empty content placeholders)
+     *   - content.md     (empty, to be filled by template/research stages)
+     *   - description.md (seeded with the payload description)
+     *
+     * @param array{
+     *     title: string,
+     *     description?: string,
+     *     domains: array<string, array<string, array{
+     *         content_tracks?: array{
+     *             config?: array{
+     *                 workflow?: string,
+     *                 template?: string,
+     *                 track?: string,
+     *                 type?: string,
+     *                 lang?: string
+     *             }
+     *         }
+     *     }>>
+     * } $data Validated payload with title, optional description, and domain/track config.
+     *
+     * @return array{
+     *     uuid: string,
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string,
+     *     tracks: array<string, array{
+     *         domain: string,
+     *         type: string,
+     *         template: string,
+     *         track: string,
+     *         track_type: string,
+     *         workflow: string,
+     *         lang: string,
+     *         content_json: string,
+     *         content_md: string,
+     *         description_md: string
+     *     }>
+     * }
+     *
+     * @throws RuntimeException If a directory cannot be created.
+     */
     public function execute(array $data): array
     {
         $title = $data["title"];
@@ -55,11 +97,9 @@ class CreateAgentStructureAction
         $dateTime = $now->format("Y_m_d_His");
         $uuid = (string) Str::uuid();
 
-        $baseDataStore = base_path("../data/agents/data");
-
-        $domainDir = "{$baseDataStore}/domains/{$year}/{$uuid}/{$dateTime}";
+        $domainDir = "{$this->basePath}/domains/{$year}/{$uuid}/{$dateTime}";
         $assetsDir = "{$domainDir}/assets";
-        $researchDir = "{$baseDataStore}/research/{$year}/{$uuid}/{$dateTime}";
+        $researchDir = "{$this->basePath}/research/{$year}/{$uuid}/{$dateTime}";
 
         $this->ensureDirectory($domainDir);
         $this->ensureDirectory($assetsDir);
@@ -81,8 +121,8 @@ class CreateAgentStructureAction
             foreach ($types as $type => $typeConfig) {
                 $typeSlug = Str::slug($type, "_");
                 $trackCfg = $typeConfig["content_tracks"]["config"] ?? [];
-                $workflow = $trackCfg["workflow"] ?? "default"; // ← added
 
+                $workflow = $trackCfg["workflow"] ?? "default";
                 $template = $trackCfg["template"] ?? "social";
                 $track = $trackCfg["track"] ?? "social_media";
                 $trackType = $trackCfg["type"] ?? "social";
@@ -150,6 +190,13 @@ class CreateAgentStructureAction
         ];
     }
 
+    /**
+     * Creates the directory (and parents) if it does not already exist.
+     *
+     * @param string $path Absolute path to the directory.
+     *
+     * @throws RuntimeException If mkdir() fails.
+     */
     private function ensureDirectory(string $path): void
     {
         if (!is_dir($path) && !mkdir($path, 0755, true)) {
