@@ -5,20 +5,47 @@ namespace App\PncAgentics\Workflows;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Contracts\FileSaverInterface;
 
+/**
+ * Gathers research data from multiple MCP tool sources and combines them
+ * into a single markdown-formatted research context.
+ *
+ * Sources queried (in order):
+ *   web-fetch  — only if a URL is provided in the payload
+ *   search     — primary search (driver: "search")
+ *   search     — secondary search (driver: "search_two")
+ *   news       — only if a domain is provided in the payload
+ *   wikipedia  — always
+ *
+ * All successful results are saved as JSON artifacts to the target directory
+ * via {@see FileSaverInterface}, and the combined text is saved as
+ * "research_summary.md".
+ *
+ * @see \App\PncAgentics\Contracts\McpToolServiceInterface
+ * @see \App\PncAgentics\Contracts\FileSaverInterface
+ */
 class ResearchGatherer
 {
     public function __construct(
-        private McpToolServiceInterface $mcp,
-        private FileSaverInterface $saver,
+        private readonly McpToolServiceInterface $mcp,
+        private readonly FileSaverInterface $saver,
     ) {}
 
     /**
-     * Gather research data using MCP tools.
-     * Saves all artifacts to the research directory.
+     * Gathers research data using MCP tools.
      *
-     * @param array  $payload         Must contain "title", optionally "url", "domain"
-     * @param string $targetDirectory Absolute path to the research/ directory
-     * @return string Combined research text to inject into refinement context
+     * Saves all artifacts to the research directory and returns the
+     * combined research text for injection into downstream refinement context.
+     *
+     * @param array{
+     *     title: string,
+     *     url?: string,
+     *     domain?: string
+     * } $payload Must contain "title"; optionally "url" and "domain".
+     *
+     * @param string $targetDirectory Absolute path to the research/ directory.
+     *
+     * @return string Combined research text (markdown sections separated by "---").
+     *                Empty string if no source returns a successful result.
      */
     public function gather(array $payload, string $targetDirectory): string
     {
@@ -29,7 +56,7 @@ class ResearchGatherer
         $topic = $payload["title"] ?? "";
         $domain = $payload["domain"] ?? "";
 
-        // If a URL is provided, scrape it
+        // Web fetch (conditional on URL)
         if ($url) {
             $fetch = $this->mcp->callWithArtifacts(
                 "web-fetch",
@@ -43,7 +70,7 @@ class ResearchGatherer
             }
         }
 
-        // Primary search (driver: search)
+        // Primary search
         $search = $this->mcp->call("search", $topic, "search");
         if ($search["success"]) {
             $this->saver->saveJson($search["data"], "search_primary");
@@ -55,7 +82,7 @@ class ResearchGatherer
                 );
         }
 
-        // Secondary search (driver: search_two)
+        // Secondary search
         $searchTwo = $this->mcp->call("search", $topic, "search_two");
         if ($searchTwo["success"]) {
             $this->saver->saveJson($searchTwo["data"], "search_secondary");
@@ -67,7 +94,7 @@ class ResearchGatherer
                 );
         }
 
-        // Search for related news (if domain is set)
+        // News (conditional on domain)
         if ($domain) {
             $news = $this->mcp->call("news", "{$domain} {$topic}");
             if ($news["success"]) {
@@ -81,7 +108,7 @@ class ResearchGatherer
             }
         }
 
-        // Wikipedia summary (for context)
+        // Wikipedia
         $wiki = $this->mcp->call("wikipedia", $topic);
         if ($wiki["success"]) {
             $this->saver->saveJson($wiki["data"], "wikipedia");
@@ -90,7 +117,7 @@ class ResearchGatherer
                 ($wiki["data"]["extract"] ?? json_encode($wiki["data"]));
         }
 
-        // Save the combined research context
+        // Save combined research context
         $researchText = implode("\n\n---\n\n", $findings);
         $this->saver->saveMarkdown($researchText, "research_summary");
 

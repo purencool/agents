@@ -8,7 +8,7 @@ COMMAND="${1:-help}"
 
 case "$COMMAND" in
     csm)
-        bash ./tests/ontent_tracks/content.sh social_media
+        bash ./tests/content_tracks/content.sh social_media
         ;;
     call)
         bash ./tests/content_tracks/content.sh all

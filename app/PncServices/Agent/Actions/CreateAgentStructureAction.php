@@ -183,6 +183,8 @@ class CreateAgentStructureAction
 
         return [
             "uuid" => $uuid,
+            "title" => $title,
+            "title_slug" => $titleSlug,
             "domain_dir" => $domainDir,
             "assets_dir" => $assetsDir,
             "research_dir" => $researchDir,

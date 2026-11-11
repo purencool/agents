@@ -9,7 +9,7 @@ use App\PncServices\Agent\Actions\WorkFlowAgentContentAction;
 use App\PncServices\Agent\Actions\TemplateAgentContentAction;
 use App\PncServices\Agent\Actions\SaveAgentContentAction;
 use PHPUnit\Framework\Attributes\Test;
-use Tests\TestCase;
+use PHPUnit\Framework\TestCase;
 
 /**
  * Unit tests for {@see AgentDataService}.
@@ -31,7 +31,7 @@ class AgentDataServiceTest extends TestCase
     private AgentDataService $service;
 
     /**
-     * Shared fixture payload loaded from tests/Fixtures/agent_data_payload.php.
+     * Shared fixture payload loaded from tests/Fixtures/input_data/agent_data_payload.php.
      *
      * @var array{title: string, description: string, domains: array}
      */
@@ -40,27 +40,50 @@ class AgentDataServiceTest extends TestCase
     /**
      * Mock structure returned by createStructureAction.
      *
-     * @var array{uuid: string, paths: array<string,string>, tracks: array<string,array>}
+     * @var array{uuid: string, title: string, domain_dir: string, assets_dir: string, research_dir: string, tracks: array<string, array>}
      */
     private array $mockStructure = [
         "uuid" => "abc-123-def",
-        "paths" => [
-            "root" => "/tmp/agents/abc-123-def",
-            "tracks" => "/tmp/agents/abc-123-def/tracks",
-        ],
+        "title" => "Can AI models be deployed on-premises?",
+        "domain_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000",
+        "assets_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000/assets",
+        "research_dir" => "/tmp/research/abc-123-def/2026_11_10_120000",
         "tracks" => [
-            "social_media_blog" => ["domain" => "blog.com", "lang" => "en"],
-            "social_media_meeting" => [
-                "domain" => "meeting.com",
+            "blog.com/blog/en" => [
+                "domain" => "blog.com",
+                "type" => "blog",
+                "template" => "social",
+                "track" => "social_media",
+                "track_type" => "social",
+                "workflow" => "default",
                 "lang" => "en",
+                "content_json" =>
+                    "/tmp/agents/abc-123-def/blogcom-test-blog-en-content.json",
+                "content_md" =>
+                    "/tmp/agents/abc-123-def/blogcom-test-blog-en-content.md",
+                "description_md" =>
+                    "/tmp/agents/abc-123-def/blogcom-test-blog-en-description.md",
+            ],
+            "meeting.com/meeting/en" => [
+                "domain" => "meeting.com",
+                "type" => "meeting",
+                "template" => "social",
+                "track" => "social_media",
+                "track_type" => "social",
+                "workflow" => "default",
+                "lang" => "en",
+                "content_json" =>
+                    "/tmp/agents/abc-123-def/meetingcom-test-meeting-en-content.json",
+                "content_md" =>
+                    "/tmp/agents/abc-123-def/meetingcom-test-meeting-en-content.md",
+                "description_md" =>
+                    "/tmp/agents/abc-123-def/meetingcom-test-meeting-en-description.md",
             ],
         ],
     ];
 
     protected function setUp(): void
     {
-        parent::setUp();
-
         $this->payload = require __DIR__ .
             "/../../../Fixtures/input_data/agent_data_payload.php";
 
@@ -90,7 +113,6 @@ class AgentDataServiceTest extends TestCase
     protected function tearDown(): void
     {
         \Mockery::close();
-        parent::tearDown();
     }
 
     /**
@@ -117,7 +139,9 @@ class AgentDataServiceTest extends TestCase
     #[Test]
     public function runResearch_delegates_to_action_and_returns_result(): void
     {
-        $expected = ["social_media_blog" => ["status" => "completed"]];
+        $expected = $this->mockStructure;
+        $expected["tracks"]["blog.com/blog/en"]["research_text"] =
+            "research data";
 
         $this->researchAction
             ->shouldReceive("execute")
@@ -136,7 +160,7 @@ class AgentDataServiceTest extends TestCase
     #[Test]
     public function runWorkFlow_delegates_to_action_and_returns_result(): void
     {
-        $expected = ["social_media_blog" => ["status" => "completed"]];
+        $expected = $this->mockStructure;
 
         $this->workFlowAction
             ->shouldReceive("execute")
@@ -155,7 +179,7 @@ class AgentDataServiceTest extends TestCase
     #[Test]
     public function applyTemplate_delegates_to_action_and_returns_result(): void
     {
-        $expected = ["social_media_blog" => ["content" => "generated text"]];
+        $expected = $this->mockStructure;
 
         $this->templateAction
             ->shouldReceive("execute")
@@ -174,7 +198,7 @@ class AgentDataServiceTest extends TestCase
     #[Test]
     public function save_delegates_to_action_and_returns_result(): void
     {
-        $expected = ["social_media_blog" => ["saved" => true]];
+        $expected = $this->mockStructure;
 
         $this->saveAction
             ->shouldReceive("execute")
@@ -189,10 +213,10 @@ class AgentDataServiceTest extends TestCase
 
     /**
      * Verifies that executeFullCreationPipeline() calls createStructure
-     * and wraps the result under the "structure" key.
+     * and runResearch in sequence, wrapping the result under the "structure" key.
      */
     #[Test]
-    public function executeFullCreationPipeline_calls_createStructure_and_wraps_result(): void
+    public function executeFullCreationPipeline_calls_createStructure_and_research(): void
     {
         $this->createStructureAction
             ->shouldReceive("execute")
@@ -200,7 +224,18 @@ class AgentDataServiceTest extends TestCase
             ->with($this->payload)
             ->andReturn($this->mockStructure);
 
-        /** @var array{structure: array{uuid: string, paths: array, tracks: array}} $result */
+        $this->researchAction
+            ->shouldReceive("execute")
+            ->once()
+            ->with($this->mockStructure)
+            ->andReturn($this->mockStructure);
+
+        $this->workFlowAction
+            ->shouldReceive("execute")
+            ->once()
+            ->with($this->mockStructure)
+            ->andReturn($this->mockStructure);
+
         $result = $this->service->executeFullCreationPipeline($this->payload);
 
         $this->assertArrayHasKey("structure", $result);
@@ -210,7 +245,7 @@ class AgentDataServiceTest extends TestCase
 
     /**
      * Verifies that executeFullCreationPipeline() does NOT call the
-     * downstream stages (research, workflow, template, save) while they
+     * downstream stages (workflow, template, save) while they
      * are still commented out.
      */
     #[Test]
@@ -222,8 +257,15 @@ class AgentDataServiceTest extends TestCase
             ->with($this->payload)
             ->andReturn($this->mockStructure);
 
-        $this->researchAction->shouldNotReceive("execute");
-        $this->workFlowAction->shouldNotReceive("execute");
+        $this->researchAction
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn($this->mockStructure);
+
+        $this->workFlowAction
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn($this->mockStructure);
         $this->templateAction->shouldNotReceive("execute");
         $this->saveAction->shouldNotReceive("execute");
 

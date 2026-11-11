@@ -50,7 +50,26 @@ class AgentDataService implements AgentDataInterface
      *
      * @param array $structure Return value from {@see self::createStructure()}.
      *
-     * @return array<string, array> Results keyed by track identifier.
+     * @return array{
+     *     uuid: string,
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string,
+     *     title: string,
+     *     title_slug: string,
+     *     tracks: array<string, array{
+     *         domain: string,
+     *         type: string,
+     *         template: string,
+     *         track: string,
+     *         track_type: string,
+     *         workflow: string,
+     *         lang: string,
+     *         content_json: string,
+     *         content_md: string,
+     *         description_md: string,
+     *         research_text: string
+     *     }>
      */
     public function runResearch(array $structure): array
     {
@@ -110,20 +129,19 @@ class AgentDataService implements AgentDataInterface
      *     }
      * } Combined results from all pipeline stages.
      *
-     * @todo Uncomment and wire up remaining stages (research, workflow, template, save).
+     * @todo Uncomment and wire up remaining stages (workflow, template, save).
      */
     public function executeFullCreationPipeline(array $data): array
     {
         $structure = $this->createStructure($data);
-
-        // $research = $this->runResearch($structure);
-        // $workFlow = $this->runWorkFlow($structure);
+        $research = $this->runResearch($structure);
+        $workFlow = $this->runWorkFlow($research);
         // $template = $this->applyTemplate($structure);
         // $save     = $this->save($template);
 
         return [
             "structure" => $structure,
-            // "research"  => $research,
+            "research" => $research,
             // "template"  => $template,
             // "work_flow" => $workFlow,
             // "save"      => $save,
