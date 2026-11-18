@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# declare.sh — Ensure all PHP files in app/ and tests/ start with declare(strict_types=1);
-# Usage: bash ./scripts/declare.sh
 
 set -euo pipefail
 
@@ -10,8 +8,8 @@ cd "$SCRIPT_DIR"
 declare -i count=0
 
 while IFS= read -r -d '' file; do
-    # Skip if already has strict_types in the first 5 lines
-    if head -n 5 "$file" | grep -q 'declare(strict_types=1);'; then
+    # Skip if already has the license header
+    if head -n 10 "$file" | grep -q '@license     GNU General Public License'; then
         continue
     fi
 
@@ -21,15 +19,27 @@ while IFS= read -r -d '' file; do
         continue
     fi
 
-    # Insert declare(strict_types=1); after the <?php line
-    # Use a temp file to avoid in-place issues
     tmp=$(mktemp)
     {
-        echo '<?php'
-        echo ''
-        echo 'declare(strict_types=1);'
-        # Rest of file starting from line 2, skipping any blank lines
-        tail -n +2 "$file" | sed '/./,$!d'
+        cat <<'HEADER'
+<?php
+
+/**
+ * @package     purencool/agent
+ *
+ * @copyright   Copyright (C) Purencool. All rights reserved.
+ * @license     GNU General Public License version 2 or later; see LICENSE
+ */
+
+declare(strict_types=1);
+
+HEADER
+
+        # Rest of file from line 2 onward, skipping leading blank lines,
+        # then removing any existing declare(strict_types=1); line
+        tail -n +2 "$file" \
+            | sed '/./,$!d' \
+            | grep -v '^declare(strict_types=1);$'
     } > "$tmp"
 
     mv "$tmp" "$file"
