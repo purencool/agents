@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncServices\Agent;
 
 use App\PncServices\Contracts\AgentDataInterface;

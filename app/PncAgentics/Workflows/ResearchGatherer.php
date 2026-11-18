@@ -1,5 +1,6 @@
 <?php
 
+declare(strict_types=1);
 namespace App\PncAgentics\Workflows;
 
 use App\PncAgentics\Contracts\McpToolServiceInterface;

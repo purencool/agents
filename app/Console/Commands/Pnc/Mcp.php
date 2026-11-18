@@ -1,16 +1,58 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Console\Commands\Pnc;
 
 use Illuminate\Console\Command;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Contracts\FileSaverInterface;
 
+/**
+ * CLI command for testing MCP (Model Context Protocol) server connectivity
+ * and exercising individual or all registered tools.
+ *
+ * Supports four modes of operation:
+ *  - Default: lists all available tools with their example inputs.
+ *  - --tool=<name>: invokes a single tool with optional --input, --driver,
+ *    and --save flags.
+ *  - --all: runs validation against every registered tool and reports a
+ *    pass/fail summary.
+ *  - --save=<path>: (used with --tool) persists tool output artifacts to disk.
+ *
+ * Exit codes:
+ *  - SUCCESS (0) when the operation completes without errors.
+ *  - FAILURE (1) when the connection fails, an unknown tool is requested,
+ *    or any tool invocation / validation fails.
+ */
 class Mcp extends Command
 {
+    /**
+     * The console command signature.
+     *
+     * @var string
+     */
     protected $signature = "pnc:mcp {--tool= : Test a specific tool} {--input= : Test input} {--all : Test all tools} {--save= : Save output to this path} {--driver= : Driver/arg2 for the tool}";
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
     protected $description = "Test MCP server connection and list available tools";
 
+    /**
+     * Execute the console command.
+     *
+     * Resolves the configured transport (local or REST), verifies connectivity
+     * by fetching the list of available tools, then dispatches to the
+     * appropriate sub-mode based on the provided options.
+     *
+     * @param McpToolServiceInterface $mcp   Service that communicates with the MCP server.
+     * @param FileSaverInterface      $saver  Service for persisting tool output artifacts.
+     *
+     * @return int Command::SUCCESS (0) or Command::FAILURE (1).
+     */
     public function handle(
         McpToolServiceInterface $mcp,
         FileSaverInterface $saver,
@@ -29,7 +71,7 @@ class Mcp extends Command
         $available = $mcp->availableTools();
 
         if (empty($available)) {
-            $this->error("❌ Connection failed — no tools returned");
+            $this->error("Connection failed — no tools returned");
             return self::FAILURE;
         }
 
@@ -64,9 +106,9 @@ class Mcp extends Command
             }
 
             if ($result["success"]) {
-                $this->info("✅ {$toolName} ({$result["elapsed_ms"]}ms)");
+                $this->info("{$toolName} ({$result["elapsed_ms"]}ms)");
             } else {
-                $this->warn("⚠️  {$toolName} ({$result["elapsed_ms"]}ms)");
+                $this->warn("{$toolName} ({$result["elapsed_ms"]}ms)");
             }
             $this->line(json_encode($result["data"], JSON_PRETTY_PRINT));
 

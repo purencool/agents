@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Unit\PncServices\Email;
 
 use App\PncServices\Email\EmailService;

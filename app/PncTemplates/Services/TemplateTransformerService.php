@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncTemplates\Services;
 
 use App\PncTemplates\Contracts\TemplateTransformerInterface;

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Feature\Console\Commands\Pnc;
 
 use App\Console\Commands\Pnc\DataCreation;

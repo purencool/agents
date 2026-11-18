@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Unit\PncServices\AI;
 
 use App\PncServices\AI\AIService;

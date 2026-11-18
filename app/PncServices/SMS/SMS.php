@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncServices\SMS;
 
 use App\PncServices\Contracts\SMSInterface;
@@ -13,9 +15,9 @@ class SMS implements SMSInterface
 
     public function __construct()
     {
-        $this->fromNumber = config('pncservices.sms.from_number');
-        $this->sid        = config('pncservices.sms.sid');
-        $this->token      = config('pncservices.sms.token');
+        $this->fromNumber = config("pncservices.sms.from_number");
+        $this->sid = config("pncservices.sms.sid");
+        $this->token = config("pncservices.sms.token");
     }
 
     public function send(string $to, string $message): bool

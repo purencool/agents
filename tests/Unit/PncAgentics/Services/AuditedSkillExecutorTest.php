@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Unit\PncAgentics\Services;
 
 use App\PncAgentics\Contracts\SkillExecutorInterface;

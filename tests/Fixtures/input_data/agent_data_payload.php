@@ -1,5 +1,6 @@
 <?php
 
+declare(strict_types=1);
 /**
  * Shared test fixture: standard agent data creation payload.
  *

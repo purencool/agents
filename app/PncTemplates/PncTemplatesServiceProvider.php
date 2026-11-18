@@ -1,13 +1,29 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncTemplates;
 
 use Illuminate\Support\ServiceProvider;
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use App\PncTemplates\Services\TemplateTransformerService;
 
+/**
+ * Service provider for the PNC Templates package.
+ *
+ * register():
+ *  - Binds TemplateTransformerInterface to TemplateTransformerService
+ *    in the application container (non-singleton).
+ *
+ * boot():
+ *  - Merges the package's config/templates.php into the application
+ *    config under the "templates" key, if the file exists.
+ */
 class PncTemplatesServiceProvider extends ServiceProvider
 {
+    /**
+     * Register service bindings in the container.
+     */
     public function register(): void
     {
         $this->app->bind(
@@ -16,9 +32,11 @@ class PncTemplatesServiceProvider extends ServiceProvider
         );
     }
 
+    /**
+     * Boot the package: merge configuration if available.
+     */
     public function boot(): void
     {
-        // Setup separate configuration baseline maps if required in future releases
         if (file_exists(__DIR__ . "/config/templates.php")) {
             $this->mergeConfigFrom(
                 __DIR__ . "/config/templates.php",

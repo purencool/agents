@@ -1,12 +1,27 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncTemplates\Engine;
 
 /**
  * Parses raw markdown text into a structured MarkdownDocument.
+ *
+ * Extraction rules:
+ *  - Title:        First H1 heading (`# ...`)
+ *  - Introduction: All text between the H1 and the first H2 (exclusive)
+ *  - Sections:     All H2 headings and their body text, keyed by heading
+ *  - Conclusion:   The specific "## Conclusion" section body
+ *  - Raw:          The original unparsed markdown string
  */
 class MarkdownParser
 {
+    /**
+     * Parse raw markdown into a MarkdownDocument.
+     *
+     * @param string $markdown The full markdown source text.
+     * @return MarkdownDocument Structured representation of the document.
+     */
     public function parse(string $markdown): MarkdownDocument
     {
         $title = $this->extractTitle($markdown);
@@ -23,6 +38,11 @@ class MarkdownParser
         );
     }
 
+    /**
+     * Extract the H1 title from the markdown.
+     *
+     * @return string The title text, or empty string if no H1 is found.
+     */
     private function extractTitle(string $markdown): string
     {
         if (preg_match('/^# (.+)$/m', $markdown, $m)) {
@@ -32,7 +52,9 @@ class MarkdownParser
     }
 
     /**
-     * @return array<string, string>
+     * Extract all H2 sections as an associative array.
+     *
+     * @return array<string, string> Section bodies keyed by H2 heading text.
      */
     private function extractSections(string $markdown): array
     {
@@ -51,6 +73,14 @@ class MarkdownParser
         return $sections;
     }
 
+    /**
+     * Extract the introduction — text between the H1 and the first H2.
+     *
+     * If no H2 exists, the entire markdown (minus the first line) is
+     * returned as the introduction.
+     *
+     * @return string The introduction text, trimmed.
+     */
     private function extractIntroduction(string $markdown): string
     {
         $pos = strpos($markdown, "\n## ");
@@ -63,6 +93,11 @@ class MarkdownParser
         return trim(implode("\n", $lines));
     }
 
+    /**
+     * Extract the body of the "## Conclusion" section specifically.
+     *
+     * @return string The conclusion body, or empty string if not found.
+     */
     private function extractConclusion(string $markdown): string
     {
         if (

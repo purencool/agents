@@ -1,14 +1,25 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncTemplates\Engine;
 
 /**
  * Immutable value object representing a parsed markdown document.
+ *
+ * Holds the structured output of MarkdownParser: a title, an introduction,
+ * H2-keyed sections, a conclusion, and the raw source text.
+ *
+ * All properties are readonly — instances are created once and never mutated.
  */
 class MarkdownDocument
 {
     /**
-     * @param array<string, string> $sections Keyed by H2 heading
+     * @param string              $title        The document title (H1 or front-matter).
+     * @param string              $introduction Text before the first H2 heading.
+     * @param array<string,string> $sections    Section bodies keyed by H2 heading text.
+     * @param string              $conclusion   The conclusion section body.
+     * @param string              $raw          The original unparsed markdown source.
      */
     public function __construct(
         public readonly string $title,
@@ -19,7 +30,11 @@ class MarkdownDocument
     ) {}
 
     /**
-     * Assembles all body sections (excluding Conclusion) into a single string.
+     * Assembles all body sections (excluding "conclusion", case-insensitive)
+     * into a single markdown string with H2 headings.
+     *
+     * @return string Concatenated sections, each prefixed with "## {heading}\n\n",
+     *                separated by double newlines.
      */
     public function body(): string
     {
@@ -34,7 +49,10 @@ class MarkdownDocument
     }
 
     /**
-     * Returns a specific section by heading, or empty string.
+     * Returns the body text of a specific section by heading.
+     *
+     * @param string $heading The H2 heading to look up.
+     * @return string The section body, or an empty string if not found.
      */
     public function section(string $heading): string
     {

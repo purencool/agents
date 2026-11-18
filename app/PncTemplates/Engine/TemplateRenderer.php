@@ -1,15 +1,41 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncTemplates\Engine;
 
 /**
- * Renders a MarkdownDocument into template-defined fields and HTML elements.
+ * Renders a MarkdownDocument into template-defined JSON fields and HTML elements.
+ *
+ * The template is a decoded JSON array with two top-level keys:
+ *  - "fields":   An array of field definitions mapping source → output key.
+ *  - "elements": An array of HTML element definitions (template, meta_tags, social_card).
+ *
+ * Field sources:
+ *  - "title"            → document title
+ *  - "introduction"     → document introduction
+ *  - "conclusion"       → document conclusion
+ *  - "body"             → all non-conclusion sections assembled
+ *  - "meta_description" → introduction truncated to 160 chars
+ *  - "full_content"     → raw markdown
+ *  - "content_data"     → JSON-encoded contentData
+ *  - "section:<name>"   → a specific section by heading
+ *  - anything else      → looked up in contentData by key
+ *
+ * Element types:
+ *  - "template"     → string with {key} placeholders, HTML-escaped
+ *  - "meta_tags"    → Open Graph meta tags
+ *  - "social_card"  → social sharing card HTML
+ *  - default        → empty string
  */
 class TemplateRenderer
 {
     /**
-     * @param array $template    Decoded template JSON (fields + elements)
-     * @param array $contentData Decoded content.json for this track
+     * Render the document into JSON fields and HTML elements.
+     *
+     * @param MarkdownDocument $doc         The parsed markdown document.
+     * @param array            $template    Decoded template JSON.
+     * @param array            $contentData Decoded content.json for this track.
      *
      * @return array{raw_json_fields: array<string, string>, html_elements: array<string, string>}
      */
@@ -28,6 +54,8 @@ class TemplateRenderer
     }
 
     /**
+     * Map each template field definition to its resolved string value.
+     *
      * @return array<string, string>
      */
     private function mapFields(
@@ -54,6 +82,8 @@ class TemplateRenderer
     }
 
     /**
+     * Render each template element definition into its HTML output.
+     *
      * @return array<string, string>
      */
     private function renderElements(
@@ -85,6 +115,12 @@ class TemplateRenderer
         return $elements;
     }
 
+    /**
+     * Resolve a field source that doesn't match a built-in keyword.
+     *
+     * Supports "section:<heading>" for section lookup, otherwise
+     * falls back to contentData key lookup.
+     */
     private function resolveSource(
         array $fieldDef,
         MarkdownDocument $doc,
@@ -99,6 +135,9 @@ class TemplateRenderer
         return $contentData[$source] ?? "";
     }
 
+    /**
+     * Truncate text to a maximum length, appending "..." if truncated.
+     */
     private function truncate(string $text, int $max): string
     {
         return mb_strlen($text) <= $max
@@ -106,6 +145,9 @@ class TemplateRenderer
             : mb_substr($text, 0, $max - 3) . "...";
     }
 
+    /**
+     * Replace {key} placeholders in a template string with HTML-escaped field values.
+     */
     private function renderTemplate(
         string $template,
         array $fields,
@@ -118,7 +160,7 @@ class TemplateRenderer
         );
         foreach ($fields as $key => $value) {
             $output = str_replace(
-                "{$key}",
+                "{" . $key . "}",
                 htmlspecialchars($value, ENT_QUOTES),
                 $output,
             );
@@ -126,6 +168,9 @@ class TemplateRenderer
         return $output;
     }
 
+    /**
+     * Generate Open Graph meta tags from the given field names.
+     */
     private function renderMetaTags(
         array $fieldNames,
         array $fields,
@@ -148,6 +193,12 @@ class TemplateRenderer
         return implode("\n", $tags);
     }
 
+    /**
+     * Generate a social sharing card HTML snippet.
+     *
+     * Uses "meta_description" field if available, otherwise falls back
+     * to "introduction".
+     */
     private function renderSocialCard(array $fields, string $title): string
     {
         $desc = $fields["meta_description"] ?? ($fields["introduction"] ?? "");

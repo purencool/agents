@@ -1,5 +1,6 @@
 <?php
 
+declare(strict_types=1);
 namespace App\PncAgentics\Services;
 
 use App\PncAgentics\Contracts\FileSaverInterface;
