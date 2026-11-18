@@ -9,24 +9,32 @@
 
 declare(strict_types=1);
 
-
 namespace App\PncAgentics\Services;
 
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Tools\McpClient;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 
 /**
  * Service layer for invoking MCP (Model Context Protocol) tools.
  *
  * Wraps the low-level {@see McpClient} with timing, success detection,
  * artifact persistence, sequential execution, and health-checking.
+ *
+ * Artifact persistence is delegated to {@see ContentPersistenceInterface},
+ * which is resolved from the service container (bound to
+ * {@see \App\PncServices\Storage\FileContentPersistence} by default).
  */
 class McpToolService implements McpToolServiceInterface
 {
     /**
-     * @param McpClient $client The underlying MCP client used to dispatch tool calls.
+     * @param McpClient                 $client      The underlying MCP client used to dispatch tool calls.
+     * @param ContentPersistenceInterface $persistence  Service used to persist artifact files to disk.
      */
-    public function __construct(private McpClient $client) {}
+    public function __construct(
+        private McpClient $client,
+        private ContentPersistenceInterface $persistence,
+    ) {}
 
     /**
      * Call a single MCP tool and return a structured result envelope.
@@ -77,6 +85,9 @@ class McpToolService implements McpToolServiceInterface
      * Always saves the JSON result. For the "web-fetch" tool specifically,
      * also performs a raw HTTP GET and saves the HTML body if present.
      *
+     * Persistence is handled by the injected {@see ContentPersistenceInterface};
+     * no temporary file objects are created here.
+     *
      * @param string      $tool         The MCP tool name.
      * @param string      $input        The primary input / argument.
      * @param string      $researchPath Absolute or relative path to the research output directory.
@@ -94,13 +105,12 @@ class McpToolService implements McpToolServiceInterface
         ?string $driver = null,
     ): array {
         $result = $this->call($tool, $input, $driver);
-        $saver = new FileSaver();
-        $saver->setPath($researchPath);
 
-        // Always save the JSON result.
-        $result["saved_json"] = $saver->saveJson($result["data"], $filename);
+        $this->persistence->saveJson(
+            "{$researchPath}/{$filename}.json",
+            $result["data"],
+        );
 
-        // Tool-specific additional artifacts.
         if ($tool === "web-fetch" && $result["success"]) {
             $rawResult = $this->call("http", "GET {$input}");
             if (isset($rawResult["data"]["body"])) {
@@ -110,7 +120,11 @@ class McpToolService implements McpToolServiceInterface
                         $rawResult["data"]["body"],
                         JSON_UNESCAPED_SLASHES,
                     );
-                $result["saved_html"] = $saver->saveHtml($html, $filename);
+
+                $this->persistence->saveHtml(
+                    "{$researchPath}/{$filename}.html",
+                    $html,
+                );
             }
         }
 

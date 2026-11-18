@@ -9,10 +9,9 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncAgentics\Workflows\Types;
 
-use App\PncAgentics\Contracts\FileSaverInterface;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Workflows\Types\UniversalDocumentationWorkflow;
 use PHPUnit\Framework\Attributes\Test;
@@ -30,7 +29,7 @@ use PHPUnit\Framework\TestCase;
 class UniversalDocumentationWorkflowTest extends TestCase
 {
     private SkillExecutorInterface $executor;
-    private FileSaverInterface $saver;
+    private ContentPersistenceInterface $saver;
     private UniversalDocumentationWorkflow $workflow;
 
     /**
@@ -65,7 +64,7 @@ class UniversalDocumentationWorkflowTest extends TestCase
     protected function setUp(): void
     {
         $this->executor = \Mockery::mock(SkillExecutorInterface::class);
-        $this->saver = \Mockery::mock(FileSaverInterface::class);
+        $this->saver = \Mockery::mock(ContentPersistenceInterface::class);
 
         $this->workflow = new UniversalDocumentationWorkflow(
             $this->executor,

@@ -9,11 +9,11 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncAgentics\Services;
 
 use App\PncAgentics\Services\McpToolService;
 use App\PncAgentics\Tools\McpClient;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -32,6 +32,11 @@ class McpToolServiceTest extends TestCase
     private McpClient $client;
 
     /**
+     * Mock content persistence injected into the service under test.
+     */
+    private ContentPersistenceInterface $persistence;
+
+    /**
      * The system under test.
      */
     private McpToolService $service;
@@ -44,7 +49,10 @@ class McpToolServiceTest extends TestCase
         parent::setUp();
 
         $this->client = $this->createMock(McpClient::class);
-        $this->service = new McpToolService($this->client);
+        $this->persistence = $this->createMock(
+            ContentPersistenceInterface::class,
+        );
+        $this->service = new McpToolService($this->client, $this->persistence);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -163,47 +171,40 @@ class McpToolServiceTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * callWithArtifacts() should save a JSON file and include the path
-     * in the "saved_json" key of the result.
+     * callWithArtifacts() should delegate JSON persistence to the
+     * ContentPersistenceInterface and include the returned path in
+     * the "saved_json" key.
      */
     #[Test]
     public function callWithArtifacts_savesJsonAndReturnsPath(): void
     {
-        $tempDir = sys_get_temp_dir() . "/mcp_test_" . uniqid();
-        mkdir($tempDir, 0755, true);
-
         $this->client->method("call")->willReturn([
             "data" => ["body" => "content here"],
             "exit_code" => 0,
         ]);
 
-        $result = $this->service->callWithArtifacts(
+        $this->persistence
+            ->expects($this->once())
+            ->method("saveJson")
+            ->with("/research/dir/my_output.json", ["body" => "content here"]);
+
+        $this->persistence->expects($this->never())->method("saveHtml");
+
+        $this->service->callWithArtifacts(
             "search",
             "test query",
-            $tempDir,
+            "/research/dir",
             "my_output",
         );
-
-        $this->assertArrayHasKey("saved_json", $result);
-        $this->assertFileExists($result["saved_json"]);
-
-        // Clean up
-        unlink($result["saved_json"]);
-        rmdir($tempDir);
     }
 
     /**
-     * callWithArtifacts() for "web-fetch" should also save HTML when
-     * the tool succeeds and the HTTP body is a string.
+     * callWithArtifacts() for "web-fetch" should also delegate HTML
+     * persistence when the tool succeeds and the HTTP body is a string.
      */
     #[Test]
     public function callWithArtifacts_savesHtmlForWebFetch(): void
     {
-        $tempDir = sys_get_temp_dir() . "/mcp_test_" . uniqid();
-        mkdir($tempDir, 0755, true);
-
-        // First call: web-fetch succeeds
-        // Second call: http GET returns the body
         $this->client->method("call")->willReturnOnConsecutiveCalls(
             ["data" => ["body" => "fetched"], "exit_code" => 0],
             [
@@ -212,53 +213,49 @@ class McpToolServiceTest extends TestCase
             ],
         );
 
-        $result = $this->service->callWithArtifacts(
+        $this->persistence
+            ->expects($this->once())
+            ->method("saveJson")
+            ->with("/research/dir/page.json", ["body" => "fetched"]);
+
+        $this->persistence
+            ->expects($this->once())
+            ->method("saveHtml")
+            ->with("/research/dir/page.html", "<html><body>Page</body></html>");
+
+        $this->service->callWithArtifacts(
             "web-fetch",
             "https://example.com",
-            $tempDir,
+            "/research/dir",
             "page",
         );
-
-        $this->assertArrayHasKey("saved_json", $result);
-        $this->assertArrayHasKey("saved_html", $result);
-        $this->assertFileExists($result["saved_html"]);
-
-        $html = file_get_contents($result["saved_html"]);
-        $this->assertStringContainsString("<html>", $html);
-
-        // Clean up
-        array_map("unlink", glob($tempDir . "/*"));
-        rmdir($tempDir);
     }
 
     /**
-     * callWithArtifacts() for "web-fetch" should NOT save HTML when the
-     * tool call fails.
+     * callWithArtifacts() for "web-fetch" should NOT call saveHtml when
+     * the tool call fails.
      */
     #[Test]
     public function callWithArtifacts_doesNotSaveHtmlOnFailure(): void
     {
-        $tempDir = sys_get_temp_dir() . "/mcp_test_" . uniqid();
-        mkdir($tempDir, 0755, true);
-
         $this->client->method("call")->willReturn([
             "data" => ["error" => "timeout"],
             "exit_code" => 1,
         ]);
 
-        $result = $this->service->callWithArtifacts(
+        $this->persistence
+            ->expects($this->once())
+            ->method("saveJson")
+            ->with("/research/dir/page.json", ["error" => "timeout"]);
+
+        $this->persistence->expects($this->never())->method("saveHtml");
+
+        $this->service->callWithArtifacts(
             "web-fetch",
             "https://unreachable.com",
-            $tempDir,
+            "/research/dir",
             "page",
         );
-
-        $this->assertArrayHasKey("saved_json", $result);
-        $this->assertArrayNotHasKey("saved_html", $result);
-
-        // Clean up
-        array_map("unlink", glob($tempDir . "/*"));
-        rmdir($tempDir);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -331,8 +328,6 @@ class McpToolServiceTest extends TestCase
     #[Test]
     public function validateAll_testsEachAvailableTool(): void
     {
-        // availableTools() calls client->call("help")
-        // Then validateAll calls client->call for each tool
         $this->client
             ->method("call")
             ->willReturnCallback(function (string $tool) {

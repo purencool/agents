@@ -9,10 +9,9 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncAgentics\Workflows\Types;
 
-use App\PncAgentics\Contracts\FileSaverInterface;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Workflows\Types\SocialMediaWorkflow;
 use Mockery;
@@ -74,7 +73,7 @@ class SocialMediaWorkflowTest extends TestCase
         parent::setUp();
 
         $this->executor = Mockery::mock(SkillExecutorInterface::class);
-        $this->saver = Mockery::mock(FileSaverInterface::class);
+        $this->saver = Mockery::mock(ContentPersistenceInterface::class);
 
         $this->workflow = new SocialMediaWorkflow(
             $this->executor,

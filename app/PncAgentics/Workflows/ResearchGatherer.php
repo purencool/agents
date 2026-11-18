@@ -12,7 +12,7 @@ declare(strict_types=1);
 namespace App\PncAgentics\Workflows;
 
 use App\PncAgentics\Contracts\McpToolServiceInterface;
-use App\PncAgentics\Contracts\FileSaverInterface;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 
 /**
  * Gathers research data from multiple MCP tool sources and combines them
@@ -26,17 +26,21 @@ use App\PncAgentics\Contracts\FileSaverInterface;
  *   wikipedia  — always
  *
  * All successful results are saved as JSON artifacts to the target directory
- * via {@see FileSaverInterface}, and the combined text is saved as
+ * via {@see ContentPersistenceInterface}, and the combined text is saved as
  * "research_summary.md".
  *
  * @see \App\PncAgentics\Contracts\McpToolServiceInterface
- * @see \App\PncAgentics\Contracts\FileSaverInterface
+ * @see \App\PncServices\Contracts\ContentPersistenceInterface
  */
 class ResearchGatherer
 {
+    /**
+     * @param McpToolServiceInterface   $mcp          Service for invoking MCP tools.
+     * @param ContentPersistenceInterface $persistence  Service for persisting artifact files.
+     */
     public function __construct(
         private readonly McpToolServiceInterface $mcp,
-        private readonly FileSaverInterface $saver,
+        private readonly ContentPersistenceInterface $persistence,
     ) {}
 
     /**
@@ -58,7 +62,7 @@ class ResearchGatherer
      */
     public function gather(array $payload, string $targetDirectory): string
     {
-        $this->saver->setPath($targetDirectory);
+        $this->persistence->setPath($targetDirectory);
         $findings = [];
 
         $url = $payload["url"] ?? null;
@@ -82,7 +86,7 @@ class ResearchGatherer
         // Primary search
         $search = $this->mcp->call("search", $topic, "search");
         if ($search["success"]) {
-            $this->saver->saveJson($search["data"], "search_primary");
+            $this->persistence->saveJsonTo("search_primary", $search["data"]);
             $findings[] =
                 "## Search Results (Primary)\n" .
                 json_encode(
@@ -94,7 +98,10 @@ class ResearchGatherer
         // Secondary search
         $searchTwo = $this->mcp->call("search", $topic, "search_two");
         if ($searchTwo["success"]) {
-            $this->saver->saveJson($searchTwo["data"], "search_secondary");
+            $this->persistence->saveJsonTo(
+                "search_secondary",
+                $searchTwo["data"],
+            );
             $findings[] =
                 "## Search Results (Secondary)\n" .
                 json_encode(
@@ -107,7 +114,7 @@ class ResearchGatherer
         if ($domain) {
             $news = $this->mcp->call("news", "{$domain} {$topic}");
             if ($news["success"]) {
-                $this->saver->saveJson($news["data"], "news_results");
+                $this->persistence->saveJsonTo("news_results", $news["data"]);
                 $findings[] =
                     "## Related News\n" .
                     json_encode(
@@ -120,7 +127,7 @@ class ResearchGatherer
         // Wikipedia
         $wiki = $this->mcp->call("wikipedia", $topic);
         if ($wiki["success"]) {
-            $this->saver->saveJson($wiki["data"], "wikipedia");
+            $this->persistence->saveJsonTo("wikipedia", $wiki["data"]);
             $findings[] =
                 "## Wikipedia\n" .
                 ($wiki["data"]["extract"] ?? json_encode($wiki["data"]));
@@ -128,7 +135,7 @@ class ResearchGatherer
 
         // Save combined research context
         $researchText = implode("\n\n---\n\n", $findings);
-        $this->saver->saveMarkdown($researchText, "research_summary");
+        $this->persistence->saveMarkdown($researchText, "research_summary");
 
         return $researchText;
     }

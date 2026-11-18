@@ -9,12 +9,10 @@
 
 declare(strict_types=1);
 
-
 namespace App\Console\Commands\Pnc;
 
 use Illuminate\Console\Command;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
-use App\PncAgentics\Contracts\FileSaverInterface;
 
 /**
  * CLI command for testing MCP (Model Context Protocol) server connectivity
@@ -57,14 +55,11 @@ class Mcp extends Command
      * appropriate sub-mode based on the provided options.
      *
      * @param McpToolServiceInterface $mcp   Service that communicates with the MCP server.
-     * @param FileSaverInterface      $saver  Service for persisting tool output artifacts.
      *
      * @return int Command::SUCCESS (0) or Command::FAILURE (1).
      */
-    public function handle(
-        McpToolServiceInterface $mcp,
-        FileSaverInterface $saver,
-    ): int {
+    public function handle(McpToolServiceInterface $mcp): int
+    {
         $transport = config("mcp_client.transport", "local");
         $this->info("Transport: {$transport}");
 

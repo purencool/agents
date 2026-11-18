@@ -13,7 +13,7 @@ namespace App\PncAgentics\Workflows\Types;
 
 use App\PncAgentics\Contracts\WorkflowInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
-use App\PncAgentics\Contracts\FileSaverInterface;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 
 /**
  * Generates a full documentation-style article for every track in the
@@ -28,7 +28,7 @@ class SocialMediaWorkflow implements WorkflowInterface
 {
     public function __construct(
         protected SkillExecutorInterface $executor,
-        protected FileSaverInterface $saver,
+        protected ContentPersistenceInterface $persistence,
     ) {}
 
     /**
@@ -44,7 +44,7 @@ class SocialMediaWorkflow implements WorkflowInterface
      *     tracks: array<string, array{
      *         domain: string,
      *         type: string,
-     *         template: string,
+     *         template: string,use App\PncServices\Contracts\ContentPersistenceInterface;
      *         track: string,
      *         track_type: string,
      *         workflow: string,
@@ -187,8 +187,8 @@ class SocialMediaWorkflow implements WorkflowInterface
                 ["temperature" => 0.1],
             );
 
-            $this->saver->setPath($targetDirectory);
-            $this->saver->saveMarkdown(
+            $this->persistence->setPath($targetDirectory);
+            $this->persistence->saveMarkdown(
                 $output,
                 basename($track["content_md"], ".md"),
             );

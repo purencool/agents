@@ -9,17 +9,14 @@
 
 declare(strict_types=1);
 
-
 namespace App\PncAgentics;
 
 use App\PncAgentics\Agents\Agent;
-use App\PncAgentics\Contracts\FileSaverInterface;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Contracts\WorkflowFactoryInterface;
 use App\PncAgentics\Factory\WorkflowFactory;
 use App\PncAgentics\Services\AuditedSkillExecutor;
-use App\PncAgentics\Services\FileSaver;
 use App\PncAgentics\Services\McpToolService;
 use App\PncAgentics\Services\SkillExecutor;
 use Illuminate\Support\Facades\File;
@@ -35,7 +32,6 @@ use Illuminate\Support\Str;
  *  - {@see SkillExecutorInterface} → {@see AuditedSkillExecutor} (transient, wraps SkillExecutor)
  *  - {@see WorkflowFactoryInterface} → {@see WorkflowFactory} (transient)
  *  - {@see McpToolServiceInterface} → {@see McpToolService} (singleton)
- *  - {@see FileSaverInterface} → {@see FileSaver} (singleton)
  *  - "pnc.skills" (singleton, lazily scans the Skills directory for .md files)
  *
  * On boot, sets `config('pnc.skills')` to a closure that defers the
@@ -71,8 +67,6 @@ class PncAgenticsServiceProvider extends ServiceProvider
             McpToolServiceInterface::class,
             McpToolService::class,
         );
-
-        $this->app->singleton(FileSaverInterface::class, FileSaver::class);
 
         $this->app->singleton("pnc.skills", function () {
             $base = app_path("PncAgentics/Skills");

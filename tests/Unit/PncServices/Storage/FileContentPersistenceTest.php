@@ -9,33 +9,30 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncServices\Storage;
 
 use App\PncServices\Storage\FileContentPersistence;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 /**
  * Unit tests for FileContentPersistence.
  *
- * Verifies that all save/read methods correctly persist and retrieve
- * data from the file system, that parent directories are created
- * automatically on write, and that read methods return null for
- * missing or invalid files.
+ * Covers both usage modes:
+ *  - Stateless (full-path API): saveJson, readJson, saveText, readText,
+ *    saveHtml, readHtml.
+ *  - Stateful (base-path API): setPath, path, save, saveJsonTo, saveHtmlTo,
+ *    saveMarkdown, append, saveFromPath, saveJsonFromPath, saveSibling.
  *
- * Uses a unique temp directory per test run, cleaned up in @After.
+ * Uses a unique temp directory per test run, cleaned up in tearDown.
  */
 class FileContentPersistenceTest extends TestCase
 {
-    /**
-     * The service under test.
-     */
+    /** @var FileContentPersistence */
     private FileContentPersistence $service;
 
-    /**
-     * Temporary base directory for all file operations in this test.
-     */
+    /** @var string */
     private string $baseDir;
 
     /**
@@ -60,12 +57,10 @@ class FileContentPersistenceTest extends TestCase
         parent::tearDown();
     }
 
-    // ─── saveJson / readJson ───────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Stateless: saveJson / readJson
+    // ─────────────────────────────────────────────────────────────
 
-    /**
-     * @testdoc Verify that saveJson() writes pretty-printed JSON and
-     *          readJson() returns the same data (round-trip).
-     */
     #[Test]
     public function json_round_trip(): void
     {
@@ -78,10 +73,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertSame($data, $result);
     }
 
-    /**
-     * @testdoc Verify that readJson() returns null when the file
-     *          does not exist.
-     */
     #[Test]
     public function readJson_returns_null_for_missing_file(): void
     {
@@ -90,10 +81,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertNull($result);
     }
 
-    /**
-     * @testdoc Verify that readJson() returns null when the file
-     *          contains invalid JSON.
-     */
     #[Test]
     public function readJson_returns_null_for_invalid_json(): void
     {
@@ -105,10 +92,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertNull($result);
     }
 
-    /**
-     * @testdoc Verify that saveJson() creates nested parent directories
-     *          that don't exist.
-     */
     #[Test]
     public function saveJson_creates_nested_directories(): void
     {
@@ -120,10 +103,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertSame(["ok" => true], $this->service->readJson($path));
     }
 
-    /**
-     * @testdoc Verify that saveJson() produces pretty-printed output
-     *          with unescaped slashes.
-     */
     #[Test]
     public function saveJson_uses_pretty_print_and_unescaped_slashes(): void
     {
@@ -137,12 +116,10 @@ class FileContentPersistenceTest extends TestCase
         $this->assertStringNotContainsString("https:\\/\\/example.com", $raw);
     }
 
-    // ─── saveText / readText ───────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Stateless: saveText / readText
+    // ─────────────────────────────────────────────────────────────
 
-    /**
-     * @testdoc Verify that saveText() writes content and readText()
-     *          returns the same content (round-trip).
-     */
     #[Test]
     public function text_round_trip(): void
     {
@@ -155,10 +132,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertSame($content, $result);
     }
 
-    /**
-     * @testdoc Verify that readText() returns null when the file
-     *          does not exist.
-     */
     #[Test]
     public function readText_returns_null_for_missing_file(): void
     {
@@ -167,9 +140,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertNull($result);
     }
 
-    /**
-     * @testdoc Verify that saveText() creates nested parent directories.
-     */
     #[Test]
     public function saveText_creates_nested_directories(): void
     {
@@ -180,12 +150,10 @@ class FileContentPersistenceTest extends TestCase
         $this->assertFileExists($path);
     }
 
-    // ─── saveHtml / readHtml ───────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Stateless: saveHtml / readHtml
+    // ─────────────────────────────────────────────────────────────
 
-    /**
-     * @testdoc Verify that saveHtml() writes HTML and readHtml()
-     *          returns the same content (round-trip).
-     */
     #[Test]
     public function html_round_trip(): void
     {
@@ -198,10 +166,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertSame($html, $result);
     }
 
-    /**
-     * @testdoc Verify that readHtml() returns null when the file
-     *          does not exist (delegates to readText).
-     */
     #[Test]
     public function readHtml_returns_null_for_missing_file(): void
     {
@@ -210,9 +174,6 @@ class FileContentPersistenceTest extends TestCase
         $this->assertNull($result);
     }
 
-    /**
-     * @testdoc Verify that saveHtml() creates nested parent directories.
-     */
     #[Test]
     public function saveHtml_creates_nested_directories(): void
     {
@@ -223,7 +184,255 @@ class FileContentPersistenceTest extends TestCase
         $this->assertFileExists($path);
     }
 
-    // ─── Helpers ───────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: setPath / path
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * setPath() creates the directory if it doesn't exist and
+     * path() returns the trimmed path.
+     */
+    #[Test]
+    public function setPath_creates_directory_and_path_returns_it(): void
+    {
+        $target = "{$this->baseDir}/new_dir/";
+
+        $this->service->setPath($target);
+
+        $this->assertDirectoryExists($target);
+        $this->assertSame("{$this->baseDir}/new_dir", $this->service->path());
+    }
+
+    /**
+     * path() throws RuntimeException when setPath() has not been called.
+     */
+    #[Test]
+    public function path_throws_when_not_set(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage("path not set");
+
+        $this->service->path();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: save
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * save() writes raw data to base/filename.ext and returns the full path.
+     */
+    #[Test]
+    public function save_writes_file_and_returns_path(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $result = $this->service->save("raw content", "myfile", "txt");
+
+        $this->assertSame("{$this->baseDir}/myfile.txt", $result);
+        $this->assertFileExists($result);
+        $this->assertSame("raw content", file_get_contents($result));
+    }
+
+    /**
+     * save() defaults to "json" extension when none is specified.
+     */
+    #[Test]
+    public function save_defaults_to_json_extension(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $result = $this->service->save("{}", "data");
+
+        $this->assertSame("{$this->baseDir}/data.json", $result);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: saveJsonTo
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * saveJsonTo() encodes data as pretty JSON and saves to base path.
+     */
+    #[Test]
+    public function saveJsonTo_writes_pretty_json(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $result = $this->service->saveJsonTo("output", ["key" => "value"]);
+
+        $this->assertSame("{$this->baseDir}/output.json", $result);
+        $this->assertSame(
+            ["key" => "value"],
+            $this->service->readJson($result),
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: saveHtmlTo
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * saveHtmlTo() writes HTML to base path and returns the full path.
+     */
+    #[Test]
+    public function saveHtmlTo_writes_html(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $result = $this->service->saveHtmlTo("page", "<h1>Hi</h1>");
+
+        $this->assertSame("{$this->baseDir}/page.html", $result);
+        $this->assertSame("<h1>Hi</h1>", file_get_contents($result));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: saveMarkdown
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * saveMarkdown() writes markdown with .md extension.
+     */
+    #[Test]
+    public function saveMarkdown_writes_md_file(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $result = $this->service->saveMarkdown("# Title\n\nBody.", "post");
+
+        $this->assertSame("{$this->baseDir}/post.md", $result);
+        $this->assertSame("# Title\n\nBody.", file_get_contents($result));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: append
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * append() adds content to an existing file without overwriting.
+     */
+    #[Test]
+    public function append_adds_to_existing_file(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $path = $this->service->save("first line\n", "log", "txt");
+        $this->service->append("second line\n", "log", "txt");
+
+        $this->assertSame(
+            "first line\nsecond line\n",
+            file_get_contents($path),
+        );
+    }
+
+    /**
+     * append() creates the file if it doesn't exist yet.
+     */
+    #[Test]
+    public function append_creates_file_if_missing(): void
+    {
+        $this->service->setPath($this->baseDir);
+
+        $path = $this->service->append("only content", "newlog", "txt");
+
+        $this->assertFileExists($path);
+        $this->assertSame("only content", file_get_contents($path));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: saveFromPath
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * saveFromPath() derives the directory and filename from a reference
+     * path, strips the original extension, and saves with the given ext.
+     */
+    #[Test]
+    public function saveFromPath_derives_path_from_reference(): void
+    {
+        $reference = "{$this->baseDir}/data/mcp/page.json";
+
+        $result = $this->service->saveFromPath("content", $reference, "html");
+
+        $this->assertSame("{$this->baseDir}/data/mcp/page.html", $result);
+        $this->assertFileExists($result);
+    }
+
+    /**
+     * saveFromPath() infers the extension from the reference when
+     * no explicit ext is given.
+     */
+    #[Test]
+    public function saveFromPath_infers_extension_when_null(): void
+    {
+        $reference = "{$this->baseDir}/data/report.md";
+
+        $result = $this->service->saveFromPath("content", $reference);
+
+        $this->assertSame("{$this->baseDir}/data/report.md", $result);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: saveJsonFromPath
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * saveJsonFromPath() encodes data as JSON and saves to the
+     * derived path.
+     */
+    #[Test]
+    public function saveJsonFromPath_writes_json_to_derived_path(): void
+    {
+        $reference = "{$this->baseDir}/out/content.json";
+        $data = ["result" => "success"];
+
+        $result = $this->service->saveJsonFromPath($data, $reference);
+
+        $this->assertSame("{$this->baseDir}/out/content.json", $result);
+        $this->assertSame($data, $this->service->readJson($result));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Stateful: saveSibling
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * saveSibling() saves to the same directory and base name as the
+     * reference but with a different extension.
+     */
+    #[Test]
+    public function saveSibling_writes_to_same_dir_with_new_ext(): void
+    {
+        $reference = "{$this->baseDir}/mcp/page.json";
+
+        $result = $this->service->saveSibling(
+            "<html></html>",
+            $reference,
+            "html",
+        );
+
+        $this->assertSame("{$this->baseDir}/mcp/page.html", $result);
+        $this->assertFileExists($result);
+        $this->assertSame("<html></html>", file_get_contents($result));
+    }
+
+    /**
+     * saveSibling() creates the directory if it doesn't exist.
+     */
+    #[Test]
+    public function saveSibling_creates_directory_if_missing(): void
+    {
+        $reference = "{$this->baseDir}/new/deep/file.json";
+
+        $result = $this->service->saveSibling("data", $reference, "html");
+
+        $this->assertDirectoryExists("{$this->baseDir}/new/deep");
+        $this->assertSame("{$this->baseDir}/new/deep/file.html", $result);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────
 
     /**
      * Recursively remove a directory and its contents.

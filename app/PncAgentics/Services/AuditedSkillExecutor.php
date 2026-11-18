@@ -66,7 +66,7 @@ class AuditedSkillExecutor implements SkillExecutorInterface
         $startTime = microtime(true);
 
         Log::channel("daily")->info(
-            "🤖 [AI Skill Init] Run ID: {$runId} | Skill: {$skillKey}",
+            "[AI Skill Init] Run ID: {$runId} | Skill: {$skillKey}",
             [
                 "variables_keys" => array_keys($variables),
                 "options" => $options,
@@ -105,7 +105,7 @@ class AuditedSkillExecutor implements SkillExecutorInterface
             $executionTime = round(microtime(true) - $startTime, 2);
 
             Log::channel("daily")->error(
-                "❌ [AI Skill Failure] Run ID: {$runId} | Time: {$executionTime}s | Error: {$e->getMessage()}",
+                "[AI Skill Failure] Run ID: {$runId} | Time: {$executionTime}s | Error: {$e->getMessage()}",
                 [
                     "trace" => $e->getTraceAsString(),
                 ],
