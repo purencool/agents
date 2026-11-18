@@ -2,135 +2,106 @@
 
 namespace App\PncServices\Agent\Actions;
 
-use App\PncTemplates\Actions\ReframeAgentContentAction;
+use App\PncServices\Contracts\ContentPersistenceInterface;
+use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use Illuminate\Support\Facades\Concurrency;
-use RuntimeException;
 
 /**
- * Reads the file structure created by CreateAgentStructureAction and
- * dispatches AI content generation for each content.json found in the domain directory.
+ * Orchestrates parallel template transformation for all tracks.
+ *
+ * Contains NO transformation logic — only concurrency, data loading,
+ * and error recovery. All "what to do with each track" lives in
+ * TemplateTransformerService.
+ *
+ * Execution strategy:
+ *  1. Builds one closure per track from the structure array.
+ *  2. Attempts parallel execution via Concurrency::driver("fork").
+ *  3. Falls back to sequential execution if the driver is "sync"
+ *     or if the parallel run throws.
+ *  4. In fallback mode, per-track exceptions are caught and returned
+ *     as error strings without aborting the remaining tracks.
  */
 class TemplateAgentContentAction
 {
+    /**
+     * @param TemplateTransformerInterface $transformer        Handles per-track transformation.
+     * @param ContentPersistenceInterface  $contentPersistence Reads content JSON files.
+     */
     public function __construct(
-        protected ReframeAgentContentAction $reframeAction,
+        private TemplateTransformerInterface $transformer,
+        private ContentPersistenceInterface $contentPersistence,
     ) {}
 
     /**
-     * @param array $structure  Return value from CreateAgentStructureAction::execute()
+     * Execute template transformation for all tracks in the structure.
+     *
+     * Each track's content JSON is loaded, passed to the transformer
+     * along with the track info, and the result is persisted.
+     *
+     * @param array $structure Pipeline structure containing a "tracks" key,
+     *                         where each value is a track info array with at
+     *                         minimum: template, content_json, content_md.
+     *
+     * @return array<string, string> Result messages keyed by track name.
+     *                               Success: "Success: [key] saved at [dir]."
+     *                               Failure: "Error: [key] [message]"
      */
     public function execute(array $structure): array
     {
-        $results = [];
-
         $tasks = [];
+
         foreach ($structure["tracks"] as $key => $trackInfo) {
-            // Open files
-            $tasks[$key] = function () use ($trackInfo, $structure) {
-                $contentData = json_decode(
-                    file_get_contents($trackInfo["content_json"]),
-                    true,
-                );
+            $tasks[$key] = function () use ($trackInfo, $key): string {
+                $contentData =
+                    $this->contentPersistence->readJson(
+                        $trackInfo["content_json"],
+                    ) ?? [];
 
-                $metrics = $this->reframeAction->execute(
-                    $trackInfo["track"],
+                $result = $this->transformer->transform(
                     $trackInfo["template"],
-                    $contentData,
-                    $structure,
                     $trackInfo,
+                    $contentData,
                 );
 
-                return "Success: [{$key}] saved at [{$metrics["target_directory"]}].";
+                return "Success: [{$key}] saved at [{$result["target_directory"]}].";
             };
         }
 
-        $timeoutCeiling = (int) config("pncservices.ai.timeout", 600);
+        $timeout = (int) config("pncservices.ai.timeout", 600);
 
         try {
             if (config("concurrency.default") === "sync") {
                 throw new \RuntimeException("Concurrency driver is sync.");
             }
 
-            $results = Concurrency::driver("fork")->run(
-                $tasks,
-                $timeoutCeiling,
-            );
-        } catch (\Throwable $e) {
-            foreach ($tasks as $key => $taskClosure) {
-                try {
-                    $results[$key] = $taskClosure();
-                } catch (\Exception $sub) {
-                    $results[$key] = "Error: [{$key}] " . $sub->getMessage();
-                }
+            return Concurrency::driver("fork")->run($tasks, $timeout);
+        } catch (\Throwable) {
+            return $this->runSequentially($tasks);
+        }
+    }
+
+    /**
+     * Execute all tasks sequentially, catching per-track exceptions.
+     *
+     * Used as a fallback when the parallel driver is unavailable or fails.
+     * A failure in one track does not prevent remaining tracks from running.
+     *
+     * @param array<string, \Closure> $tasks Callable tasks keyed by track name.
+     *
+     * @return array<string, string> Result or error message per track.
+     */
+    private function runSequentially(array $tasks): array
+    {
+        $results = [];
+
+        foreach ($tasks as $key => $task) {
+            try {
+                $results[$key] = $task();
+            } catch (\Exception $e) {
+                $results[$key] = "Error: [{$key}] " . $e->getMessage();
             }
         }
 
         return $results;
-    }
-
-    /**
-     * Reconstruct the structure array from a UUID on disk.
-     * Allows calling execute() from a retry command, queue job, or REST endpoint
-     * without needing the original CreateAgentStructureAction call in the same process.
-     */
-    public static function fromUuid(string $uuid): array
-    {
-        $baseDataStore = base_path("../data/agents/data");
-
-        // Find the year directory that contains this UUID
-        $domainDir = null;
-        foreach (
-            glob("{$baseDataStore}/domains/*/{$uuid}/*", GLOB_ONLYDIR)
-            as $dir
-        ) {
-            $domainDir = $dir;
-            break;
-        }
-
-        if (!$domainDir) {
-            throw new RuntimeException(
-                "No domain directory found for UUID: {$uuid}",
-            );
-        }
-
-        // Derive year and research path
-        $year = basename(dirname(dirname($domainDir)));
-        $timestamp = basename($domainDir);
-        $researchDir = "{$baseDataStore}/research/{$year}/{$uuid}/{$timestamp}";
-
-        // Rebuild tracks from content.json files on disk
-        $tracks = [];
-        foreach (glob("{$domainDir}/*-content.json") as $jsonFile) {
-            $data = json_decode(file_get_contents($jsonFile), true);
-            $key = "{$data["domain"]}/{$data["type"]}/{$data["lang"]}";
-
-            $tracks[$key] = [
-                "domain" => $data["domain"],
-                "type" => $data["type"],
-                "template" => $data["template"],
-                "track" => $data["track"],
-                "track_type" => $data["track_type"],
-                "lang" => $data["lang"],
-                "content_json" => $jsonFile,
-                "content_md" => str_replace(
-                    "-content.json",
-                    "-content.md",
-                    $jsonFile,
-                ),
-                "description_md" => str_replace(
-                    "-content.json",
-                    "-description.md",
-                    $jsonFile,
-                ),
-            ];
-        }
-
-        return [
-            "uuid" => $uuid,
-            "domain_dir" => $domainDir,
-            "assets_dir" => "{$domainDir}/assets",
-            "research_dir" => $researchDir,
-            "tracks" => $tracks,
-        ];
     }
 }

@@ -1,80 +1,77 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Console\Commands\Pnc;
 
+use App\PncServices\Contracts\AgentDataInterface;
 use Illuminate\Console\Command;
-use App\PncServices\Contracts\LoggingServiceInterface;
-use App\PncAgentics\Agents\Agent;
+use Illuminate\Support\Facades\Log;
 
 /**
- * @example  php artisan pnc:agent --input='{
- *   "skill": "communications_pr.internal_communications.skills",
- *   "prompt": "Draft an announcement for the new AI tooling.",
- *   "system": " You are talking to software engineers.",
- *   "temperature": 0.7
- * }'
+ * Artisan command that executes a single AI agent skill run.
  *
+ * Accepts a raw JSON payload as a positional argument containing the
+ * skill key, prompt, optional system override, and temperature.
+ * Delegates to AgentDataInterface for execution.
+ *
+ * @example php artisan pnc:agent '{"skill":"communications_pr.internal_communications.skills","prompt":"Draft an announcement.","system":"You are talking to software engineers.","temperature":0.7}'
  */
 class AIAgent extends Command
 {
     /**
      * The name and signature of the console command.
      */
-    protected $signature = 'pnc:agent {--input= : JSON string with prompt, system, temperature, etc.}';
+    protected $signature = "pnc:agent {data : The raw JSON string with skill, prompt, system, temperature}";
 
     /**
      * The console command description.
      */
-    protected $description = 'Create documentation.';
+    protected $description = "Execute a single AI agent skill run.";
 
     /**
      * Execute the console command.
+     *
+     * Parses the JSON argument, validates required keys, delegates to
+     * AgentDataInterface, and logs the result with timing.
+     *
+     * @param AgentDataInterface $agentData The agent data service.
+     *
+     * @return int Command::SUCCESS (0) or Command::FAILURE (1).
      */
-    public function handle(
-        LoggingServiceInterface $logger,
-        Agent $agent
-    ): int {
-        if ($this->option('input')) {
-            $raw = $this->option('input');
-        } else {
-            $this->error('{"prompt":"No prompt was offered."}');
-            return self::FAILURE;
-        }
+    public function handle(AgentDataInterface $agentData): int
+    {
+        $totalJobStart = microtime(true);
 
-        $data = json_decode($raw, true);
-
+        $config = json_decode($this->argument("data"), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            $this->error('Invalid JSON: ' . json_last_error_msg());
+            $this->error("Invalid JSON: " . json_last_error_msg());
             return self::FAILURE;
         }
 
-        $skillsRequest = $data['skill'] ?? null;
-
-        if ($skillsRequest === null) {
-            $this->error('No skill specified.');
-            return self::FAILURE;
-        }
-
-        $skills = config('pnc.skills');
-        $system = $data['system'] ?? '';
-        $skill  = $skills[$skillsRequest] ?? null;
-
+        $skill = $config["skill"] ?? null;
         if ($skill === null) {
-            $this->error("Skill '{$skillsRequest}' did not load.");
+            $this->error("No skill specified.");
             return self::FAILURE;
         }
 
-        $input = [
-            'prompt'      => $data['prompt'] ?? '',
-            'system'      => $skill . $system,
-            'temperature' => $data['temperature'] ?? 0.3,
-        ];
+        $this->info("Executing skill: {$skill}");
 
-        $result = $agent->run($input);
+        $result = $agentData->executeSkillRun($config);
 
-        $this->info($result['response']);
+        $response = $result["response"] ?? "";
+        $this->info($response);
+
+        $totalJobDuration = round(microtime(true) - $totalJobStart, 2);
+
+        Log::channel("daily")->info(
+            " [SKILL RUN COMPLETED] in {$totalJobDuration}s",
+            ["skill" => $skill, "title" => $config["prompt"] ?? ""],
+        );
+
+        $this->line(str_repeat("=", 80));
+        $this->info(" Done in {$totalJobDuration}s!");
 
         return self::SUCCESS;
     }
 }
-

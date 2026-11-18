@@ -236,6 +236,12 @@ class AgentDataServiceTest extends TestCase
             ->with($this->mockStructure)
             ->andReturn($this->mockStructure);
 
+        $this->templateAction
+            ->shouldReceive("execute")
+            ->once()
+            ->with($this->mockStructure)
+            ->andReturn($this->mockStructure);
+
         $result = $this->service->executeFullCreationPipeline($this->payload);
 
         $this->assertArrayHasKey("structure", $result);
@@ -266,7 +272,12 @@ class AgentDataServiceTest extends TestCase
             ->shouldReceive("execute")
             ->once()
             ->andReturn($this->mockStructure);
-        $this->templateAction->shouldNotReceive("execute");
+
+        $this->templateAction
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn($this->mockStructure);
+
         $this->saveAction->shouldNotReceive("execute");
 
         $result = $this->service->executeFullCreationPipeline($this->payload);

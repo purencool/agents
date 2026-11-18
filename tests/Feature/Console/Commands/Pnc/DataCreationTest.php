@@ -1,16 +1,19 @@
 <?php
 
-namespace Tests\Unit\Pnc\Commands;
+namespace Tests\Feature\Console\Commands\Pnc;
 
 use App\Console\Commands\Pnc\DataCreation;
 use App\PncServices\Contracts\AgentDataInterface;
+use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use Illuminate\Support\Facades\Log;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 class DataCreationTest extends TestCase
 {
     private AgentDataInterface $agentData;
+    private TemplateTransformerInterface $templateTransformer;
 
     private array $payload = [
         "title" =>
@@ -51,13 +54,21 @@ class DataCreationTest extends TestCase
     {
         parent::setUp();
 
-        $this->agentData = \Mockery::mock(AgentDataInterface::class);
+        $this->agentData = Mockery::mock(AgentDataInterface::class);
         $this->app->instance(AgentDataInterface::class, $this->agentData);
+
+        $this->templateTransformer = Mockery::mock(
+            TemplateTransformerInterface::class,
+        );
+        $this->app->instance(
+            TemplateTransformerInterface::class,
+            $this->templateTransformer,
+        );
     }
 
     protected function tearDown(): void
     {
-        \Mockery::close();
+        Mockery::close();
         parent::tearDown();
     }
 
@@ -88,9 +99,7 @@ class DataCreationTest extends TestCase
         Log::shouldReceive("channel")
             ->once()
             ->with("daily")
-            ->andReturn(
-                \Mockery::mock()->shouldReceive("info")->once()->mock(),
-            );
+            ->andReturn(Mockery::mock()->shouldReceive("info")->once()->mock());
 
         $this->artisan("pnc:agent:data:creation", ["data" => $json])
             ->expectsOutputToContain(
@@ -137,9 +146,7 @@ class DataCreationTest extends TestCase
         Log::shouldReceive("channel")
             ->once()
             ->with("daily")
-            ->andReturn(
-                \Mockery::mock()->shouldReceive("info")->once()->mock(),
-            );
+            ->andReturn(Mockery::mock()->shouldReceive("info")->once()->mock());
 
         $this->artisan("pnc:agent:data:creation", ["data" => $json])
             ->expectsOutputToContain("UUID: def-456  Tracks: 2")
@@ -161,9 +168,7 @@ class DataCreationTest extends TestCase
         Log::shouldReceive("channel")
             ->once()
             ->with("daily")
-            ->andReturn(
-                \Mockery::mock()->shouldReceive("info")->once()->mock(),
-            );
+            ->andReturn(Mockery::mock()->shouldReceive("info")->once()->mock());
 
         $this->artisan("pnc:agent:data:creation", ["data" => $json])
             ->expectsOutputToContain("UUID: xyz-789  Tracks: 0")

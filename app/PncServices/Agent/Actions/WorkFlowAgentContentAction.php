@@ -59,7 +59,7 @@ class WorkFlowAgentContentAction
             $structure["tracks"][$firstTrackKey]["workflow"],
         );
 
-        $workflow->execute($structure);
+        $structure["content"] = $workflow->execute($structure);
 
         return $structure;
     }

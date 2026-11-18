@@ -3,74 +3,141 @@
 namespace App\PncTemplates\Services;
 
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
-use App\PncTemplates\Data\DynamicServicePayload;
-use App\PncServices\AI\PncAgent;
-use NeuronAI\Chat\Messages\UserMessage;
+use App\PncTemplates\Engine\MarkdownParser;
+use App\PncTemplates\Engine\TemplateRenderer;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 use InvalidArgumentException;
 
+/**
+ * Orchestrates the template transformation pipeline for a single track.
+ *
+ * 1. Reads generated markdown via ContentPersistenceInterface
+ * 2. Resolves and loads the template blueprint
+ * 3. Delegates parsing to MarkdownParser
+ * 4. Delegates rendering to TemplateRenderer
+ * 5. Persists output artifacts via ContentPersistenceInterface
+ */
 class TemplateTransformerService implements TemplateTransformerInterface
 {
-    public function transform(string $template, string $rawContent): array
-    {
-        if (!file_exists($template)) {
-            throw new InvalidArgumentException(
-                "Missing layout configuration profile at: {$template}",
-            );
-        }
+    public function __construct(
+        private ContentPersistenceInterface $contentPersistence,
+        private MarkdownParser $parser,
+        private TemplateRenderer $renderer,
+    ) {}
 
-        $config = json_decode(file_get_contents($template), true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new InvalidArgumentException(
-                "Malformed JSON template configuration: " .
-                    json_last_error_msg(),
-            );
-        }
-
-        $compiledInstructions =
-            $config["system_prompt"] .
-            "\n\nCRITICAL STRIP & EXTRACT REQUIREMENTS:\n";
-        foreach ($config["elements_map"] as $key => $meta) {
-            $compiledInstructions .= " - Extract key '{$key}': Looking for content matching '{$meta["selector"]}'. Directive: {$meta["description"]}\n";
-        }
-        $compiledInstructions .=
-            "\nIsolate the sections precisely, strip off the matching title elements headers themselves, and return only the raw text strings.";
-
-        $agent = new PncAgent([
-            "temperature" => $config["options"]["temperature"] ?? 0.1,
-            "max_tokens" => $config["options"]["max_tokens"] ?? 2500,
-        ]);
-        $agent->setInstructions($compiledInstructions);
-
-        /** @var DynamicServicePayload $structuredOutput */
-        $structuredOutput = $agent->structured(
-            new UserMessage($rawContent),
-            DynamicServicePayload::class,
+    /**
+     * Transforms the generated content for a single track.
+     *
+     * @param string $templateFilename Template name without extension (e.g. "blog_post")
+     *
+     * @param array{
+     *     domain: string,
+     *     type: string,
+     *     template: string,
+     *     track: string,
+     *     track_type: string,
+     *     workflow: string,
+     *     lang: string,
+     *     content_json: string,
+     *     content_md: string,
+     *     description_md: string,
+     *     research_text: string
+     * } $trackInfo
+     *
+     * @param array $contentData Decoded content.json for this track.
+     *
+     * @return array{
+     *     target_directory: string,
+     *     extracted_fields: array,
+     *     html_elements: array<string, string>
+     * }
+     */
+    public function transform(
+        string $templateFilename,
+        array $trackInfo,
+        array $contentData,
+    ): array {
+        $markdown = $this->contentPersistence->readText(
+            $trackInfo["content_md"],
         );
 
-        $extractedFields = $structuredOutput->elements;
+        if ($markdown === null) {
+            throw new InvalidArgumentException(
+                "Content markdown not found at: {$trackInfo["content_md"]}",
+            );
+        }
 
-        $htmlElements = [];
-        foreach ($extractedFields as $key => $content) {
-            if ($key === "title") {
-                $htmlElements["title"] =
-                    "<h1>" . htmlspecialchars($content) . "</h1>";
-                continue;
-            }
+        $template = $this->loadTemplate($templateFilename);
 
-            $htmlElements[$key] = sprintf(
-                '<div id="%s" class="pnc-template-node pnc-type-%s"><h2>%s</h2><p>%s</p></div>',
-                htmlspecialchars($key),
-                htmlspecialchars($config["type"]),
-                htmlspecialchars(ucfirst($key)),
-                nl2br(htmlspecialchars($content)),
+        $doc = $this->parser->parse($markdown);
+        $result = $this->renderer->render($doc, $template, $contentData);
+
+        $targetDir = dirname($trackInfo["content_md"]);
+
+        $this->contentPersistence->saveJson(
+            "{$targetDir}/content.json",
+            $result["raw_json_fields"],
+        );
+
+        foreach ($result["html_elements"] as $key => $html) {
+            $this->contentPersistence->saveHtml(
+                "{$targetDir}/element_{$key}.html",
+                $html,
             );
         }
 
         return [
-            "type" => $config["type"],
-            "raw_json_fields" => $extractedFields,
-            "html_elements" => $htmlElements,
-            "transformed_at" => now()->toIso8601String(),
+            "target_directory" => $targetDir,
+            "extracted_fields" => $result["raw_json_fields"],
+            "html_elements" => $result["html_elements"],
         ];
+    }
+
+    /**
+     * Resolves and loads the template blueprint JSON.
+     *
+     * Uses ContentPersistenceInterface for consistency — when storage
+     * moves to a database, templates resolve the same way.
+     */
+    private function loadTemplate(string $filename): array
+    {
+        $path = $this->resolveTemplatePath($filename);
+
+        $data = $this->contentPersistence->readJson($path);
+
+        if ($data === null) {
+            throw new InvalidArgumentException(
+                "Template at {$path} is not valid JSON.",
+            );
+        }
+
+        return $data;
+    }
+
+    /**
+     * Cascading template path resolution.
+     */
+    private function resolveTemplatePath(string $filename): string
+    {
+        $file = $filename . ".json";
+
+        $overrideDir = rtrim((string) env("TEMPLATE_OVERRIDES", ""), "/");
+        if (!empty($overrideDir) && file_exists("{$overrideDir}/{$file}")) {
+            return "{$overrideDir}/{$file}";
+        }
+
+        $appPath = app_path("PncTemplates/Templates/{$file}");
+        if (file_exists($appPath)) {
+            return $appPath;
+        }
+
+        $defaultPath = app_path("PncTemplates/Templates/default.json");
+        if (file_exists($defaultPath)) {
+            return $defaultPath;
+        }
+
+        throw new InvalidArgumentException(
+            "Could not resolve template '{$file}' in overrides, app templates, or default.",
+        );
     }
 }

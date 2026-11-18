@@ -3,6 +3,7 @@
 namespace App\PncServices;
 
 use Illuminate\Support\ServiceProvider;
+use App\PncServices\Contracts\ContentPersistenceInterface;
 use App\PncServices\Contracts\EmailServiceInterface;
 use App\PncServices\Contracts\AIServiceInterface;
 use App\PncServices\Contracts\SMSInterface;
@@ -15,6 +16,7 @@ use App\PncServices\AI\AIService;
 use App\PncServices\SMS\SMS;
 use App\PncServices\REST\RestService;
 use App\PncServices\Agent\AgentDataService;
+use App\PncServices\Storage\FileContentPersistence;
 
 class PncServicesServiceProvider extends ServiceProvider
 {
@@ -26,6 +28,10 @@ class PncServicesServiceProvider extends ServiceProvider
         $this->app->bind(RestServiceInterface::class, RestService::class);
         $this->app->bind(LoggingServiceInterface::class, LoggingService::class);
         $this->app->bind(AgentDataInterface::class, AgentDataService::class);
+        $this->app->bind(
+            ContentPersistenceInterface::class,
+            FileContentPersistence::class,
+        );
     }
 
     public function boot(): void

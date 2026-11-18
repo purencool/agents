@@ -13,7 +13,8 @@ use PHPUnit\Framework\TestCase;
  *
  * Verifies that the correct workflow is selected based on the first
  * track's "workflow" field, that the full structure is passed through
- * unmodified, and that the structure is returned unchanged.
+ * unmodified as the argument, and that the workflow's string output
+ * is stored in the structure's "content" key for downstream templating.
  *
  * @covers \App\PncServices\Agent\Actions\WorkFlowAgentContentAction
  */
@@ -86,7 +87,7 @@ class WorkFlowAgentContentActionTest extends TestCase
 
     /**
      * Verifies that a "default" workflow routes to UniversalDocumentationWorkflow
-     * and the full structure is passed as the sole argument.
+     * and the workflow's output is stored in the "content" key.
      */
     #[Test]
     public function execute_routes_default_workflow_to_universal(): void
@@ -101,11 +102,14 @@ class WorkFlowAgentContentActionTest extends TestCase
 
         $result = $this->action->execute($this->structure);
 
-        $this->assertSame($this->structure, $result);
+        $expected = $this->structure;
+        $expected["content"] = "Generated output";
+        $this->assertSame($expected, $result);
     }
 
     /**
-     * Verifies that a "social_media" workflow routes to SocialMediaWorkflow.
+     * Verifies that a "social_media" workflow routes to SocialMediaWorkflow
+     * and the workflow's output is stored in the "content" key.
      */
     #[Test]
     public function execute_routes_social_media_workflow_to_social(): void
@@ -123,11 +127,14 @@ class WorkFlowAgentContentActionTest extends TestCase
 
         $result = $this->action->execute($structure);
 
-        $this->assertSame($structure, $result);
+        $expected = $structure;
+        $expected["content"] = "Social output";
+        $this->assertSame($expected, $result);
     }
 
     /**
-     * Verifies that an empty workflow string is treated as "default".
+     * Verifies that an empty workflow string is treated as "default"
+     * and routed to UniversalDocumentationWorkflow.
      */
     #[Test]
     public function execute_routes_empty_workflow_to_universal(): void
@@ -145,7 +152,9 @@ class WorkFlowAgentContentActionTest extends TestCase
 
         $result = $this->action->execute($structure);
 
-        $this->assertSame($structure, $result);
+        $expected = $structure;
+        $expected["content"] = "Output";
+        $this->assertSame($expected, $result);
     }
 
     /**
@@ -169,14 +178,17 @@ class WorkFlowAgentContentActionTest extends TestCase
 
         $result = $this->action->execute($structure);
 
-        $this->assertSame($structure, $result);
+        $expected = $structure;
+        $expected["content"] = "Output";
+        $this->assertSame($expected, $result);
     }
 
     /**
-     * Verifies that the structure is returned completely unmodified.
+     * Verifies that the original structure keys are preserved and
+     * that the "content" key is the only addition.
      */
     #[Test]
-    public function execute_returns_structure_unmodified(): void
+    public function execute_adds_content_key_to_structure(): void
     {
         $this->universalWorkflow
             ->shouldReceive("execute")
@@ -188,15 +200,31 @@ class WorkFlowAgentContentActionTest extends TestCase
         $this->assertSame($this->structure["uuid"], $result["uuid"]);
         $this->assertSame($this->structure["title"], $result["title"]);
         $this->assertSame(
+            $this->structure["title_slug"],
+            $result["title_slug"],
+        );
+        $this->assertSame(
             $this->structure["domain_dir"],
             $result["domain_dir"],
         );
+        $this->assertSame(
+            $this->structure["assets_dir"],
+            $result["assets_dir"],
+        );
+        $this->assertSame(
+            $this->structure["research_dir"],
+            $result["research_dir"],
+        );
         $this->assertSame($this->structure["tracks"], $result["tracks"]);
+
+        $this->assertArrayHasKey("content", $result);
+        $this->assertSame("Output", $result["content"]);
     }
 
     /**
      * Verifies that the workflow is called exactly once with the full
-     * structure (not per-track).
+     * structure (not per-track) and that the content string is a
+     * non-empty value suitable for downstream templating.
      */
     #[Test]
     public function execute_calls_workflow_once_with_full_structure(): void
@@ -210,10 +238,12 @@ class WorkFlowAgentContentActionTest extends TestCase
                     isset($structure["tracks"]["blog.com/blog/en"]) &&
                     isset($structure["tracks"]["meeting.com/meeting/en"]);
             })
-            ->andReturn("Output");
+            ->andReturn("# Full article content");
 
-        $this->action->execute($this->structure);
+        $result = $this->action->execute($this->structure);
 
-        $this->addToAssertionCount(1);
+        $this->assertIsString($result["content"]);
+        $this->assertNotSame("", $result["content"]);
+        $this->assertSame("# Full article content", $result["content"]);
     }
 }

@@ -136,15 +136,14 @@ class AgentDataService implements AgentDataInterface
         $structure = $this->createStructure($data);
         $research = $this->runResearch($structure);
         $workFlow = $this->runWorkFlow($research);
-        // $template = $this->applyTemplate($structure);
+        $template = $this->applyTemplate($workFlow);
         // $save     = $this->save($template);
 
         return [
             "structure" => $structure,
             "research" => $research,
-            // "template"  => $template,
-            // "work_flow" => $workFlow,
-            // "save"      => $save,
+            "work_flow" => $workFlow,
+            "template" => $template,
         ];
     }
 }

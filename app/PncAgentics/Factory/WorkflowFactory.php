@@ -1,14 +1,40 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\PncAgentics\Factory;
 
 use App\PncAgentics\Contracts\WorkflowFactoryInterface;
+use App\PncAgentics\Workflows\UniversalDocumentationWorkflow;
 use InvalidArgumentException;
 
+/**
+ * Factory for resolving enterprise content-generation workflows.
+ *
+ * Maps a workflow type string to its standardized base key and returns
+ * a {@see UniversalDocumentationWorkflow} instance configured for that track.
+ *
+ * Supported types:
+ *  - developer_docs
+ *  - product_guides
+ *  - social_media
+ *  - sales_copy
+ *  - blog_posts
+ */
 class WorkflowFactory implements WorkflowFactoryInterface
 {
     /**
-     * Resolves the standardized Universal content generation workflow for all tracks.
+     * Resolve a workflow by type.
+     *
+     * @param string $type      The workflow type identifier (e.g. "developer_docs").
+     * @param bool   $isUpdate  Whether this is an update run (reserved for future use).
+     *
+     * @return array{
+     *     workflow: UniversalDocumentationWorkflow,
+     *     base_key: string,
+     * }
+     *
+     * @throws InvalidArgumentException When the type is not a recognized workflow type.
      */
     public function make(string $type, bool $isUpdate = false): array
     {
@@ -26,9 +52,7 @@ class WorkflowFactory implements WorkflowFactoryInterface
         };
 
         return [
-            "workflow" => app(
-                \App\PncAgentics\Workflows\UniversalDocumentationWorkflow::class,
-            ),
+            "workflow" => app(UniversalDocumentationWorkflow::class),
             "base_key" => $resolvedBaseKey,
         ];
     }

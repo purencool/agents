@@ -3,17 +3,30 @@
 namespace App\PncServices\AI;
 
 use App\PncServices\Contracts\AIServiceInterface;
+use App\PncServices\Contracts\LoggingServiceInterface;
 use Illuminate\Support\Facades\Log;
+use NeuronAI\Agent\Agent;
 use NeuronAI\Chat\Messages\UserMessage;
 use NeuronAI\RAG\Embeddings\OpenAILikeEmbeddings;
 
+/**
+ * AI service that provides completion, embedding, and chat capabilities.
+ *
+ * Wraps NeuronAI's agent and embedding clients behind a stable interface,
+ * adding structured error logging on failure.
+ */
 class AIService implements AIServiceInterface
 {
+    /**
+     * Embedding client for text vectorisation.
+     */
     protected OpenAILikeEmbeddings $embeddings;
 
-    public function __construct(
-        protected \App\PncServices\Contracts\LoggingServiceInterface $logger,
-    ) {
+    /**
+     * @param LoggingServiceInterface $logger Application-wide structured logger.
+     */
+    public function __construct(protected LoggingServiceInterface $logger)
+    {
         $this->embeddings = new OpenAILikeEmbeddings(
             baseUri: config("pncservices.ai.base_url"),
             key: config("pncservices.ai.api_key"),
@@ -21,10 +34,33 @@ class AIService implements AIServiceInterface
         );
     }
 
+    /**
+     * Create a PncAgent instance.
+     *
+     * Overridable for testing.
+     *
+     * @param array $options Agent configuration parameters.
+     */
+    protected function createAgent(array $options = []): PncAgent
+    {
+        return new PncAgent($options);
+    }
+
+    /**
+     * Generate a one-shot completion from the AI model.
+     *
+     * @param string $prompt  The user prompt.
+     * @param array  $options Optional: "system" (string), "temperature", "max_tokens".
+     *
+     * @return string The model's text response.
+     *
+     * @throws \Throwable Re-thrown after logging.
+     */
     public function complete(string $prompt, array $options = []): string
     {
-        $agent = new PncAgent($options);
+        $agent = $this->createAgent($options);
         $agent->setThreadId("one-shot");
+
         if (!empty($options["system"])) {
             $agent->setInstructions((string) $options["system"]);
         }
@@ -35,9 +71,7 @@ class AIService implements AIServiceInterface
                 ->getMessage()
                 ->getContent();
 
-            $response = $content ?? "";
-
-            return $response;
+            return $content ?? "";
         } catch (\Throwable $e) {
             Log::error("AIService::complete — request failed", [
                 "error" => $e->getMessage(),
@@ -47,11 +81,19 @@ class AIService implements AIServiceInterface
         }
     }
 
+    /**
+     * Generate a vector embedding for the given text.
+     *
+     * @param string $text The text to embed.
+     *
+     * @return float[] The embedding vector.
+     *
+     * @throws \Throwable Re-thrown after logging.
+     */
     public function embed(string $text): array
     {
         try {
-            $vector = $this->embeddings->embedText($text);
-            return $vector;
+            return $this->embeddings->embedText($text);
         } catch (\Throwable $e) {
             Log::error("AIService::embed — request failed", [
                 "error" => $e->getMessage(),
@@ -61,23 +103,29 @@ class AIService implements AIServiceInterface
     }
 
     /**
-     * Fix: Signature updated to have exactly 2 arguments matching AIServiceInterface.
+     * Send a chat message and return the model's response.
+     *
+     * @param string $message The user message.
+     * @param array  $history Conversation history (reserved).
+     *
+     * @return string The model's text response.
+     *
+     * @throws \Throwable Re-thrown after logging.
      */
     public function chat(string $message, array $history = []): string
     {
         $threadId = "default";
 
         try {
-            $start = microtime(true);
-            $agent = new PncAgent();
+            $agent = $this->createAgent();
+            $agent->setThreadId($threadId);
+
             $content = $agent
-                ->setThreadId($threadId)
                 ->chat(new UserMessage($message))
                 ->getMessage()
                 ->getContent();
 
-            $response = $content ?? "";
-            return $response;
+            return $content ?? "";
         } catch (\Throwable $e) {
             Log::error("AIService::chat — request failed", [
                 "thread_id" => $threadId,

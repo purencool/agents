@@ -85,8 +85,9 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
                 ["temperature" => 0.1],
             );
 
-            $cleanJson = preg_replace("/```json\s*|```/", "", $sectionsJson);
-            $cleanJson = trim($cleanJson);
+            $cleanJson = trim(
+                preg_replace("/```json\s*|```/", "", $sectionsJson),
+            );
             $sections = json_decode($cleanJson, true) ?: [$title];
             $bodyCanvas = "";
 
