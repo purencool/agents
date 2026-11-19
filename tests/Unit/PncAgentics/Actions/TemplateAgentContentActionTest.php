@@ -9,10 +9,9 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\PncAgentics\Actions;
 
-namespace Tests\Unit\PncServices\Agent\Actions;
-
-use App\PncServices\Agent\Actions\TemplateAgentContentAction;
+use App\PncAgentics\Actions\TemplateAgentContentAction;
 use App\PncServices\Contracts\ContentPersistenceInterface;
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use Illuminate\Support\Facades\Concurrency;

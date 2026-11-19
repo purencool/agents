@@ -9,11 +9,10 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Feature\Console\Commands\Pnc;
 
 use App\Console\Commands\Pnc\DataCreation;
-use App\PncServices\Contracts\AgentDataInterface;
+use App\PncAgentics\Contracts\AgentDataInterface;
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use Illuminate\Support\Facades\Log;
 use Mockery;

@@ -9,10 +9,9 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\PncAgentics\Agent;
 
-namespace Tests\Unit\PncServices\AI;
-
-use App\PncServices\AI\PncAgent;
+use App\PncAgentics\Agent\PncAgent;
 use NeuronAI\Chat\Messages\SystemMessage;
 use NeuronAI\Providers\OpenAILike;
 use PHPUnit\Framework\Attributes\Test;

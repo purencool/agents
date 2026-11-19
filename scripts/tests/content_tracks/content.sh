@@ -4,7 +4,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# First positional arg selects the target track (or "all")
 TARGET="${1:-all}"
+
+# Shift removes $1 from "$@", so "$@" now only contains extra args
+# (e.g. --debug) that should be forwarded to the track scripts.
+shift 2>/dev/null || true
 
 declare -A TRACKS=(
     ["blog_posts"]="blog_posts/blog_posts.sh"
@@ -14,12 +19,13 @@ declare -A TRACKS=(
     ["social_media"]="social_media/social_media.sh"
 )
 
+# Resolve the target into one or more track scripts
 if [ "$TARGET" = "all" ]; then
     test_scripts=("${TRACKS[@]}")
 elif [ -n "${TRACKS[$TARGET]+x}" ]; then
     test_scripts=("${TRACKS[$TARGET]}")
 else
-    echo "Usage: $0 {blog_posts|developer|product_guide|sales_copy|social_media|all}"
+    echo "Usage: $0 {blog_posts|developer|product_guide|sales_copy|social_media|all} [extra args...]"
     exit 1
 fi
 
@@ -31,6 +37,7 @@ echo "PNC ENTERPRISE AGENT ENGINE: PIPELINE TESTING SUITE"
 echo "================================================================================"
 echo " Execution Directory: $PWD"
 echo " Target: $TARGET"
+echo " Extra Args: ${*:--- (none)}"
 echo " Started At: $(date)"
 echo "================================================================================"
 echo ""
@@ -43,7 +50,10 @@ for script in "${test_scripts[@]}"; do
     if [ -f "$script" ]; then
         chmod +x "$script"
         TRACK_START_TIME=$(date +%s)
-        ./"$script"
+
+        # Forward any extra arguments (e.g. --debug) to the track script
+        ./"$script" "$@"
+
         TRACK_END_TIME=$(date +%s)
         TRACK_DURATION=$((TRACK_END_TIME - TRACK_START_TIME))
         echo " Component [ $script ] finished cleanly in ${TRACK_DURATION}s."

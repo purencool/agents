@@ -9,15 +9,13 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\PncAgentics\Services;
 
-namespace Tests\Unit\PncServices\Agent;
-
-use App\PncServices\Agent\AgentDataService;
-use App\PncServices\Agent\Actions\CreateAgentStructureAction;
-use App\PncServices\Agent\Actions\ResearchAgentContentAction;
-use App\PncServices\Agent\Actions\WorkFlowAgentContentAction;
-use App\PncServices\Agent\Actions\TemplateAgentContentAction;
-use App\PncServices\Agent\Actions\SaveAgentContentAction;
+use App\PncAgentics\Services\AgentDataService;
+use App\PncAgentics\Actions\CreateAgentStructureAction;
+use App\PncAgentics\Actions\ResearchAgentContentAction;
+use App\PncAgentics\Actions\WorkFlowAgentContentAction;
+use App\PncAgentics\Actions\TemplateAgentContentAction;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -28,7 +26,7 @@ use PHPUnit\Framework\TestCase;
  * and that {@see AgentDataService::executeFullCreationPipeline()} returns
  * the documented array shape.
  *
- * @covers \App\PncServices\Agent\AgentDataService
+ * @covers \App\PncAgentics\AgentDataService
  */
 class AgentDataServiceTest extends TestCase
 {
@@ -36,7 +34,6 @@ class AgentDataServiceTest extends TestCase
     private ResearchAgentContentAction $researchAction;
     private WorkFlowAgentContentAction $workFlowAction;
     private TemplateAgentContentAction $templateAction;
-    private SaveAgentContentAction $saveAction;
 
     private AgentDataService $service;
 
@@ -109,14 +106,12 @@ class AgentDataServiceTest extends TestCase
         $this->templateAction = \Mockery::mock(
             TemplateAgentContentAction::class,
         );
-        $this->saveAction = \Mockery::mock(SaveAgentContentAction::class);
 
         $this->service = new AgentDataService(
             $this->createStructureAction,
             $this->researchAction,
             $this->workFlowAction,
             $this->templateAction,
-            $this->saveAction,
         );
     }
 
@@ -203,25 +198,6 @@ class AgentDataServiceTest extends TestCase
     }
 
     /**
-     * Verifies that save() delegates to SaveAgentContentAction.
-     */
-    #[Test]
-    public function save_delegates_to_action_and_returns_result(): void
-    {
-        $expected = $this->mockStructure;
-
-        $this->saveAction
-            ->shouldReceive("execute")
-            ->once()
-            ->with($this->mockStructure)
-            ->andReturn($expected);
-
-        $result = $this->service->save($this->mockStructure);
-
-        $this->assertSame($expected, $result);
-    }
-
-    /**
      * Verifies that executeFullCreationPipeline() calls createStructure
      * and runResearch in sequence, wrapping the result under the "structure" key.
      */
@@ -287,8 +263,6 @@ class AgentDataServiceTest extends TestCase
             ->shouldReceive("execute")
             ->once()
             ->andReturn($this->mockStructure);
-
-        $this->saveAction->shouldNotReceive("execute");
 
         $result = $this->service->executeFullCreationPipeline($this->payload);
 

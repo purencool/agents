@@ -9,8 +9,7 @@
 
 declare(strict_types=1);
 
-
-namespace App\PncServices\Contracts;
+namespace App\PncAgentics\Contracts;
 
 interface AgentDataInterface
 {

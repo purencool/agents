@@ -9,8 +9,7 @@
 
 declare(strict_types=1);
 
-
-namespace App\PncServices\Agent\Actions;
+namespace App\PncAgentics\Actions;
 
 use Illuminate\Support\Str;
 use RuntimeException;

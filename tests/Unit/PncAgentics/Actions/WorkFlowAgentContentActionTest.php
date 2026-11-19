@@ -9,12 +9,11 @@
 
 declare(strict_types=1);
 
-
-namespace Tests\Unit\PncServices\Agent\Actions;
+namespace Tests\Unit\PncAgentics\Actions;
 
 use App\PncAgentics\Workflows\Types\SocialMediaWorkflow;
 use App\PncAgentics\Workflows\Types\UniversalDocumentationWorkflow;
-use App\PncServices\Agent\Actions\WorkFlowAgentContentAction;
+use App\PncAgentics\Actions\WorkFlowAgentContentAction;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -26,7 +25,7 @@ use PHPUnit\Framework\TestCase;
  * unmodified as the argument, and that the workflow's string output
  * is stored in the structure's "content" key for downstream templating.
  *
- * @covers \App\PncServices\Agent\Actions\WorkFlowAgentContentAction
+ * @covers \App\PncAgentics\Actions\WorkFlowAgentContentAction
  */
 class WorkFlowAgentContentActionTest extends TestCase
 {

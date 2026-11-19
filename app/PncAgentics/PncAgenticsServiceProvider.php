@@ -11,7 +11,8 @@ declare(strict_types=1);
 
 namespace App\PncAgentics;
 
-use App\PncAgentics\Agents\Agent;
+use App\PncAgentics\Contracts\AgentDataInterface;
+use App\PncAgentics\Services\AgentDataService;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Contracts\WorkflowFactoryInterface;
@@ -44,16 +45,7 @@ class PncAgenticsServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(Agent::class);
-
-        $this->app->bind(SkillExecutor::class, function ($app) {
-            return new SkillExecutor(
-                $app->make(
-                    \App\PncServices\Contracts\AIServiceInterface::class,
-                ),
-            );
-        });
-
+        $this->app->bind(AgentDataInterface::class, AgentDataService::class);
         $this->app->bind(SkillExecutorInterface::class, function ($app) {
             return new AuditedSkillExecutor($app->make(SkillExecutor::class));
         });

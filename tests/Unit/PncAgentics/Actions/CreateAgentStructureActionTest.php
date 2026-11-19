@@ -9,10 +9,9 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\PncAgentics\Actions;
 
-namespace Tests\Unit\PncServices\Agent\Actions;
-
-use App\PncServices\Agent\Actions\CreateAgentStructureAction;
+use App\PncAgentics\Actions\CreateAgentStructureAction;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -26,7 +25,7 @@ use RecursiveIteratorIterator;
  * and the returned structure shape. Uses a temp directory to avoid
  * polluting the real data store.
  *
- * @covers \App\PncServices\Agent\Actions\CreateAgentStructureAction
+ * @covers \App\PncAgentics\Actions\CreateAgentStructureAction
  */
 class CreateAgentStructureActionTest extends TestCase
 {
@@ -47,7 +46,7 @@ class CreateAgentStructureActionTest extends TestCase
     protected function setUp(): void
     {
         $this->payload = require __DIR__ .
-            "/../../../../Fixtures/input_data/agent_data_payload.php";
+            "/../../../Fixtures/input_data/agent_data_payload.php";
 
         $this->tempBase = sys_get_temp_dir() . "/agent_test_" . uniqid();
         mkdir($this->tempBase, 0755, true);

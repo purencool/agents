@@ -9,8 +9,7 @@
 
 declare(strict_types=1);
 
-
-namespace App\PncServices\AI;
+namespace App\PncAgentics\Agent;
 
 use NeuronAI\Agent\Agent;
 use NeuronAI\Chat\Messages\SystemMessage;

@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands\Pnc;
 
-use App\PncServices\Contracts\AgentDataInterface;
+use App\PncAgentics\Contracts\AgentDataInterface;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Console\Command;
 

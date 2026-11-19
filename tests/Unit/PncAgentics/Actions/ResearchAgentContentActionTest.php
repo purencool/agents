@@ -9,11 +9,10 @@
 
 declare(strict_types=1);
 
-
-namespace Tests\Unit\PncServices\Agent\Actions;
+namespace Tests\Unit\PncAgentics\Actions;
 
 use App\PncAgentics\Workflows\ResearchGatherer;
-use App\PncServices\Agent\Actions\ResearchAgentContentAction;
+use App\PncAgentics\Actions\ResearchAgentContentAction;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -26,7 +25,7 @@ use Tests\TestCase;
  * in the structure, and that an exception is thrown when research_dir
  * is missing.
  *
- * @covers \App\PncServices\Agent\Actions\ResearchAgentContentAction
+ * @covers \App\PncAgentics\Actions\ResearchAgentContentAction
  */
 class ResearchAgentContentActionTest extends TestCase
 {

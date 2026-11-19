@@ -9,15 +9,13 @@
 
 declare(strict_types=1);
 
+namespace App\PncAgentics\Services;
 
-namespace App\PncServices\Agent;
-
-use App\PncServices\Contracts\AgentDataInterface;
-use App\PncServices\Agent\Actions\CreateAgentStructureAction;
-use App\PncServices\Agent\Actions\ResearchAgentContentAction;
-use App\PncServices\Agent\Actions\WorkFlowAgentContentAction;
-use App\PncServices\Agent\Actions\TemplateAgentContentAction;
-use App\PncServices\Agent\Actions\SaveAgentContentAction;
+use App\PncAgentics\Contracts\AgentDataInterface;
+use App\PncAgentics\Actions\CreateAgentStructureAction;
+use App\PncAgentics\Actions\ResearchAgentContentAction;
+use App\PncAgentics\Actions\WorkFlowAgentContentAction;
+use App\PncAgentics\Actions\TemplateAgentContentAction;
 
 /**
  * Orchestrates the full agent content creation pipeline.
@@ -32,7 +30,6 @@ class AgentDataService implements AgentDataInterface
         protected ResearchAgentContentAction $researchAction,
         protected WorkFlowAgentContentAction $workFlowAction,
         protected TemplateAgentContentAction $templateAction,
-        protected SaveAgentContentAction $saveAction,
     ) {}
 
     /**
@@ -111,18 +108,6 @@ class AgentDataService implements AgentDataInterface
     }
 
     /**
-     * Persists generated content to the filesystem.
-     *
-     * @param array $structure Return value from {@see self::createStructure()}.
-     *
-     * @return array<string, array> Results keyed by track identifier.
-     */
-    public function save(array $structure): array
-    {
-        return $this->saveAction->execute($structure);
-    }
-
-    /**
      * Runs the full pipeline (structure → template → research → workflow → save) in sequence.
      *
      * @param array{
@@ -147,7 +132,6 @@ class AgentDataService implements AgentDataInterface
         $research = $this->runResearch($structure);
         $workFlow = $this->runWorkFlow($research);
         $template = $this->applyTemplate($workFlow);
-        // $save     = $this->save($template);
 
         return [
             "structure" => $structure,

@@ -9,16 +9,13 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncServices;
 
-use App\PncServices\Contracts\AgentDataInterface;
 use App\PncServices\Contracts\AIServiceInterface;
 use App\PncServices\Contracts\EmailServiceInterface;
 use App\PncServices\Contracts\LoggingServiceInterface;
 use App\PncServices\Contracts\RestServiceInterface;
 use App\PncServices\Contracts\SMSInterface;
-use App\PncServices\Agent\AgentDataService;
 use App\PncServices\AI\AIService;
 use App\PncServices\Email\EmailService;
 use App\PncServices\Logging\LoggingService;
@@ -41,7 +38,6 @@ class PncServicesServiceProviderTest extends TestCase
             SMSInterface::class => SMS::class,
             RestServiceInterface::class => RestService::class,
             LoggingServiceInterface::class => LoggingService::class,
-            AgentDataInterface::class => AgentDataService::class,
         ];
 
         foreach ($bindings as $abstract => $concrete) {
