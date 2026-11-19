@@ -12,13 +12,11 @@ declare(strict_types=1);
 namespace Tests\Unit\PncAgentics\Services;
 
 use App\PncAgentics\Services\SkillExecutor;
-use App\PncServices\Contracts\AIServiceInterface;
+use App\PncAgentics\Contracts\AgentServiceInterface;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 /**
@@ -31,7 +29,7 @@ class SkillExecutorTest extends TestCase
     /**
      * Mock AI service injected into the executor under test.
      */
-    private AIServiceInterface $aiService;
+    private AgentServiceInterface $aiService;
 
     /**
      * The system under test.
@@ -55,7 +53,7 @@ class SkillExecutorTest extends TestCase
         $ref = new \ReflectionProperty(SkillExecutor::class, "loadedPrompts");
         $ref->setValue(null, []);
 
-        $this->aiService = $this->createMock(AIServiceInterface::class);
+        $this->aiService = $this->createMock(AgentServiceInterface::class);
         $this->executor = new SkillExecutor($this->aiService);
 
         // Create a temporary directory for fixture skill files.

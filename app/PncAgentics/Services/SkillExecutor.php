@@ -9,12 +9,11 @@
 
 declare(strict_types=1);
 
-
 namespace App\PncAgentics\Services;
 
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Data\SkillOptions;
-use App\PncServices\Contracts\AIServiceInterface;
+use App\PncAgentics\Contracts\AgentServiceInterface;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
@@ -36,9 +35,9 @@ class SkillExecutor implements SkillExecutorInterface
     protected static array $loadedPrompts = [];
 
     /**
-     * @param AIServiceInterface $aiService The AI service used to complete LLM calls.
+     * @param AgentServiceInterface $aiService The AI service used to complete LLM calls.
      */
-    public function __construct(protected AIServiceInterface $aiService) {}
+    public function __construct(protected AgentServiceInterface $aiService) {}
 
     /**
      * Execute a skill by its dot-notation key.

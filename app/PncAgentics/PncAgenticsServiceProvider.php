@@ -13,6 +13,7 @@ namespace App\PncAgentics;
 
 use App\PncAgentics\Contracts\AgentDataInterface;
 use App\PncAgentics\Services\AgentDataService;
+use App\PncAgentics\Contracts\AgentServiceInterface;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Contracts\WorkflowFactoryInterface;
@@ -20,6 +21,7 @@ use App\PncAgentics\Factory\WorkflowFactory;
 use App\PncAgentics\Services\AuditedSkillExecutor;
 use App\PncAgentics\Services\McpToolService;
 use App\PncAgentics\Services\SkillExecutor;
+use App\PncAgentics\Services\AgentService;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
@@ -45,6 +47,8 @@ class PncAgenticsServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(AgentServiceInterface::class, AgentService::class);
+
         $this->app->bind(AgentDataInterface::class, AgentDataService::class);
         $this->app->bind(SkillExecutorInterface::class, function ($app) {
             return new AuditedSkillExecutor($app->make(SkillExecutor::class));

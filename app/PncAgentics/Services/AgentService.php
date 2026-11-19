@@ -9,23 +9,22 @@
 
 declare(strict_types=1);
 
+namespace App\PncAgentics\Services;
 
-namespace App\PncServices\AI;
-
-use App\PncServices\Contracts\AIServiceInterface;
+use App\PncAgentics\Contracts\AgentServiceInterface;
+use App\PncAgentics\Agent\PncAgent;
 use App\PncServices\Contracts\LoggingServiceInterface;
 use Illuminate\Support\Facades\Log;
-use NeuronAI\Agent\Agent;
 use NeuronAI\Chat\Messages\UserMessage;
 use NeuronAI\RAG\Embeddings\OpenAILikeEmbeddings;
 
 /**
- * AI service that provides completion, embedding, and chat capabilities.
+ * Agent service that provides completion, embedding, and chat capabilities.
  *
  * Wraps NeuronAI's agent and embedding clients behind a stable interface,
  * adding structured error logging on failure.
  */
-class AIService implements AIServiceInterface
+class AgentService implements AgentServiceInterface
 {
     /**
      * Embedding client for text vectorisation.

@@ -9,10 +9,11 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncAgentics;
 
-use App\PncAgentics\Agents\Agent;
+use App\PncAgentics\Agent\PncAgent;
+use App\PncAgentics\Contracts\AgentServiceInterface;
+use App\PncAgentics\Services\AgentService;
 use App\PncAgentics\Contracts\FileSaverInterface;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
@@ -21,7 +22,6 @@ use App\PncAgentics\Factory\WorkflowFactory;
 use App\PncAgentics\PncAgenticsServiceProvider;
 use App\PncAgentics\Services\AuditedSkillExecutor;
 use App\PncAgentics\Services\SkillExecutor;
-use App\PncServices\Contracts\AIServiceInterface;
 use Tests\TestCase;
 
 /**
@@ -49,12 +49,9 @@ class PncAgenticsServiceProviderTest extends TestCase
         $this->provider = new PncAgenticsServiceProvider($this->app);
         $this->provider->register();
 
-        $this->app->bind(Agent::class, fn() => new \stdClass());
+        $this->app->bind(PncAgent::class, fn() => new \stdClass());
 
-        $this->app->bind(
-            AIServiceInterface::class,
-            fn() => $this->createMock(AIServiceInterface::class),
-        );
+        $this->app->bind(AgentServiceInterface::class, AgentService::class);
     }
 
     // ─────────────────────────────────────────────────────────────────────
