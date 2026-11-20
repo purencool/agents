@@ -1,0 +1,10 @@
+{
+  "name": "sales_marketing.sales.skills",
+  "system_instructions": "# Sales Skills Matrix\nPlaceholder for tracking required and acquired skills within the Sales function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

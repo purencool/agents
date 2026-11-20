@@ -1,0 +1,10 @@
+{
+  "name": "operations.supply_chain.skills",
+  "system_instructions": "# Supply Chain Skills Matrix\nPlaceholder for tracking required and acquired skills within the Supply Chain function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

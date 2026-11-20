@@ -1,0 +1,10 @@
+{
+  "name": "human_resources.employee_relations.hr_support_teams.skills",
+  "system_instructions": "# Hr Support Teams Skills Matrix\nPlaceholder for tracking required and acquired skills for the Hr Support Teams team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

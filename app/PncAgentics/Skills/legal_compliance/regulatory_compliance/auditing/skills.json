@@ -1,0 +1,10 @@
+{
+  "name": "legal_compliance.regulatory_compliance.auditing.skills",
+  "system_instructions": "# Auditing Skills Matrix\nPlaceholder for tracking required and acquired skills for the Auditing team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

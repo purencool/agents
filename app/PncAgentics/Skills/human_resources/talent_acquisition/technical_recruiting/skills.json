@@ -1,0 +1,10 @@
+{
+  "name": "human_resources.talent_acquisition.technical_recruiting.skills",
+  "system_instructions": "# Technical Recruiting Skills Matrix\nPlaceholder for tracking required and acquired skills for the Technical Recruiting team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

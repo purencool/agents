@@ -1,0 +1,10 @@
+{
+  "name": "sales_marketing.sales.account_management.skills",
+  "system_instructions": "# Account Management Skills Matrix\nPlaceholder for tracking required and acquired skills for the Account Management team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

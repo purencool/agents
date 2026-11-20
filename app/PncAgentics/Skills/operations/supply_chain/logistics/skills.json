@@ -1,0 +1,10 @@
+{
+  "name": "operations.supply_chain.logistics.skills",
+  "system_instructions": "# Logistics Skills Matrix\nPlaceholder for tracking required and acquired skills for the Logistics team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

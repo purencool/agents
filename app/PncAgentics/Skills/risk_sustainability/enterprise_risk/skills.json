@@ -1,0 +1,10 @@
+{
+  "name": "risk_sustainability.enterprise_risk.skills",
+  "system_instructions": "# Enterprise Risk Skills Matrix\nPlaceholder for tracking required and acquired skills within the Enterprise Risk function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

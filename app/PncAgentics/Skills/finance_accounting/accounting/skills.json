@@ -1,0 +1,10 @@
+{
+  "name": "finance_accounting.accounting.skills",
+  "system_instructions": "# Accounting Skills Matrix\nPlaceholder for tracking required and acquired skills within the Accounting function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

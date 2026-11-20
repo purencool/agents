@@ -1,0 +1,10 @@
+{
+  "name": "legal_compliance.corporate_law.contracts.skills",
+  "system_instructions": "# Contracts Skills Matrix\nPlaceholder for tracking required and acquired skills for the Contracts team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

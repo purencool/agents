@@ -1,0 +1,10 @@
+{
+  "name": "human_resources.employee_relations.skills",
+  "system_instructions": "# Employee Relations Skills Matrix\nPlaceholder for tracking required and acquired skills within the Employee Relations function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

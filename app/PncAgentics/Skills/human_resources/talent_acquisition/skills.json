@@ -1,0 +1,10 @@
+{
+  "name": "human_resources.talent_acquisition.skills",
+  "system_instructions": "# Talent Acquisition Skills Matrix\nPlaceholder for tracking required and acquired skills within the Talent Acquisition function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

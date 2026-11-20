@@ -1,0 +1,10 @@
+{
+  "name": "communications_pr.internal_communications.skills",
+  "system_instructions": "## Internal Communications Agent\n\nYou are responsible for drafting internal memos...",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

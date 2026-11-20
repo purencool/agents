@@ -1,0 +1,10 @@
+{
+  "name": "operations.facilities_management.skills",
+  "system_instructions": "# Facilities Management Skills Matrix\nPlaceholder for tracking required and acquired skills within the Facilities Management function.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}

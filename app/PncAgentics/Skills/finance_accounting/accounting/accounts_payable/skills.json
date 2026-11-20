@@ -1,0 +1,10 @@
+{
+  "name": "finance_accounting.accounting.accounts_payable.skills",
+  "system_instructions": "# Accounts Payable Skills Matrix\nPlaceholder for tracking required and acquired skills for the Accounts Payable team.",
+  "model": "",
+  "temperature": "",
+  "top_p": "",
+  "tool_definitions": "",
+  "response_schema": "",
+  "token_limits": ""
+}
