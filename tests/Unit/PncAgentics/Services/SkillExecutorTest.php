@@ -22,12 +22,21 @@ use Tests\TestCase;
 /**
  * Unit tests for {@see SkillExecutor}.
  *
+ * Tests the skill resolution, template compilation, prompt payload
+ * construction, and delegation to the agent service.
+ *
+ * The agent service mock expects the new single-array contract:
+ *   AgentServiceInterface::complete(array $request): string
+ *
+ * where $request contains "system_prompt", "user_prompt", "temperature",
+ * "max_tokens", and "metadata" keys.
+ *
  * @covers \App\PncAgentics\Services\SkillExecutor
  */
 class SkillExecutorTest extends TestCase
 {
     /**
-     * Mock AI service injected into the executor under test.
+     * Mock agent service injected into the executor under test.
      */
     private AgentServiceInterface $aiService;
 
@@ -42,8 +51,9 @@ class SkillExecutorTest extends TestCase
     private string $tempDir;
 
     /**
-     * Set up the test environment: mock the AI service, create a temp
-     * directory for fixture files, and instantiate the executor.
+     * Set up the test environment: mock the agent service, reset the static
+     * prompt cache, create a temp directory for fixture files, and
+     * instantiate the executor.
      */
     protected function setUp(): void
     {
@@ -77,8 +87,8 @@ class SkillExecutorTest extends TestCase
 
     /**
      * When given a standard skill key, execute() should resolve the file,
-     * load its contents, and delegate to the AI service with the correct
-     * prompt payload and metadata.
+     * load its contents, compile placeholders, build the prompt payload,
+     * and delegate to the agent service with the correct structured request.
      */
     #[Test]
     public function execute_resolvesFileAndCallsAiService(): void
@@ -117,7 +127,9 @@ class SkillExecutorTest extends TestCase
 
     /**
      * When the skill key contains "batch_draft_engine", execute() should
-     * route to executeGroupedBlock and mark the call as aggregated.
+     * route to executeGroupedBlock, aggregate Phase A sub-agent skill files
+     * into a combined system prompt, and mark the call as aggregated in
+     * the metadata.
      */
     #[Test]
     public function execute_routesToGroupedBlockForDraftEngine(): void
@@ -127,15 +139,10 @@ class SkillExecutorTest extends TestCase
             ->method("complete")
             ->with(
                 $this->callback(
-                    fn(string $payload): bool => str_contains(
-                        $payload,
+                    fn(array $request): bool => str_contains(
+                        $request["system_prompt"],
                         "PHASE A: CORE CONTENT DRAFTING",
-                    ),
-                ),
-                $this->callback(
-                    fn(array $config): bool => $config["metadata"][
-                        "is_aggregated"
-                    ] === true,
+                    ) && $request["metadata"]["is_aggregated"] === true,
                 ),
             )
             ->willReturn("Drafted content");
@@ -167,7 +174,9 @@ class SkillExecutorTest extends TestCase
 
     /**
      * When the skill key contains "batch_expand_engine", execute() should
-     * route to executeGroupedBlock with Phase B sub-agents.
+     * route to executeGroupedBlock, aggregate Phase B sub-agent skill files
+     * into a combined system prompt, and mark the call as aggregated in
+     * the metadata.
      */
     #[Test]
     public function execute_routesToGroupedBlockForExpandEngine(): void
@@ -177,15 +186,10 @@ class SkillExecutorTest extends TestCase
             ->method("complete")
             ->with(
                 $this->callback(
-                    fn(string $payload): bool => str_contains(
-                        $payload,
+                    fn(array $request): bool => str_contains(
+                        $request["system_prompt"],
                         "PHASE B: VALUE EXTRACTION METRICS",
-                    ),
-                ),
-                $this->callback(
-                    fn(array $config): bool => $config["metadata"][
-                        "is_aggregated"
-                    ] === true,
+                    ) && $request["metadata"]["is_aggregated"] === true,
                 ),
             )
             ->willReturn("Expanded content");
@@ -223,23 +227,11 @@ class SkillExecutorTest extends TestCase
     public function resolveFilePath_convertsSkillsSuffixToSkillsMdExtension(): void
     {
         // Create the expected file.
-        $relativeDir = $this->tempDir;
-        $dir = $relativeDir . "/track/core_writing/body_content";
+        $dir = $this->tempDir . "/track/core_writing/body_content";
         mkdir($dir, 0755, true);
         $filePath = $dir . "/topic_sentence_opener.skills.md";
         file_put_contents($filePath, "content");
 
-        $method = new \ReflectionMethod(
-            SkillExecutor::class,
-            "resolveFilePath",
-        );
-        $method->setAccessible(true);
-
-        // We can't easily override app_path() in a pure unit test,
-        // so we verify the path construction logic by checking the
-        // relative path that would be built.
-        $skillKey =
-            "track.core_writing.body_content.topic_sentence_opener.skills";
         $expectedRelative =
             "track" .
             DIRECTORY_SEPARATOR .
@@ -296,7 +288,7 @@ class SkillExecutorTest extends TestCase
     /**
      * loadFileContent() should cache file contents in the static
      * $loadedPrompts array and return the same value on subsequent calls
-     * without re-reading the file.
+     * without re-reading the file from disk.
      */
     #[Test]
     public function loadFileContent_cachesResultInStaticProperty(): void
@@ -325,7 +317,8 @@ class SkillExecutorTest extends TestCase
 
     /**
      * Scalar variables should replace their corresponding {{ key }}
-     * placeholders in the template.
+     * placeholders in the template. Non-scalar values and unmatched
+     * placeholders should remain untouched.
      */
     #[Test]
     #[DataProvider("placeholderProvider")]
@@ -345,6 +338,8 @@ class SkillExecutorTest extends TestCase
     }
 
     /**
+     * Data provider for parsePlaceholders tests.
+     *
      * @return array<string, array{0: string, 1: array, 2: string}>
      */
     public static function placeholderProvider(): array
@@ -394,7 +389,8 @@ class SkillExecutorTest extends TestCase
 
     /**
      * buildPromptPayload() should produce a payload with three clearly
-     * delimited sections: system protocols, contextual data, and execution run.
+     * delimited sections: system protocols, contextual data workspace,
+     * and execution run instruction.
      */
     #[Test]
     public function buildPromptPayload_includesAllThreeSections(): void
@@ -473,7 +469,8 @@ class SkillExecutorTest extends TestCase
 
     /**
      * processLLMCall() should pass correct metadata (skill key, source,
-     * aggregated flag) to the AI service.
+     * aggregated flag) and the compiled system prompt to the agent service
+     * within the structured request array.
      */
     #[Test]
     public function processLLMCall_passesCorrectMetadata(): void
@@ -482,13 +479,13 @@ class SkillExecutorTest extends TestCase
             ->expects($this->once())
             ->method("complete")
             ->with(
-                $this->anything(),
-                $this->callback(function (array $config) {
-                    return $config["metadata"]["skill_executed"] ===
-                        "my.skill.key" &&
-                        $config["metadata"]["resolved_file"] ===
+                $this->callback(function (array $request): bool {
+                    return $request["system_prompt"] === "Some instructions" &&
+                        $request["metadata"]["skill_executed"] ===
+                            "my.skill.key" &&
+                        $request["metadata"]["resolved_file"] ===
                             "/path/to/file.md" &&
-                        $config["metadata"]["is_aggregated"] === false;
+                        $request["metadata"]["is_aggregated"] === false;
                 }),
             )
             ->willReturn("ok");
@@ -513,9 +510,10 @@ class SkillExecutorTest extends TestCase
 
     /**
      * Create fixture skill files for the given sub-agent names under
-     * the temporary directory, mimicking the expected path structure.
+     * the temporary directory, mimicking the expected path structure
+     * that resolveFilePath() would produce for grouped block keys.
      *
-     * @param string[] $agentNames
+     * @param string[] $agentNames Dot-notation-free agent names.
      */
     private function createSubAgentFixtures(array $agentNames): void
     {
@@ -532,7 +530,9 @@ class SkillExecutorTest extends TestCase
     }
 
     /**
-     * Recursively remove a directory and its contents.
+     * Recursively remove a directory and all its contents.
+     *
+     * Used in tearDown to clean up fixture files created during the test.
      */
     private function removeDirectory(string $dir): void
     {

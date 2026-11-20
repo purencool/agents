@@ -51,5 +51,5 @@ interface AgentDataInterface
      * @param array $data Validated payload
      * @return array Combined results from all pipeline stages
      */
-    public function executeFullCreationPipeline(array $data): array;
+    public function executeCreationPipeline(array $data): array;
 }

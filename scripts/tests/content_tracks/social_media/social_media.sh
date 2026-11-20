@@ -13,6 +13,8 @@ cd "$ROOT"
 
 CONFIG="${SCRIPT_DIR}/social_media.json"
 CONFIG_UPDATE="${SCRIPT_DIR}/social_media_update.json"
+AI_ENABLED=$(grep -E '^AI_ENABLE=' "$ROOT/.env" | sed 's/^AI_ENABLE=//' | tr -d '"' | tr -d "'" || echo "true")
+AI_ENABLE="${AI_ENABLED:-true}"
 
 TITLE=""
 DEBUG=""
@@ -27,9 +29,10 @@ TITLE="${TITLE:-Test Document}"
 echo "========================================"
 echo "  Agent Data Creation"
 echo "========================================"
-echo " Config:  $CONFIG"
-echo " Title:   $TITLE"
-echo " Debug:   ${DEBUG:-off}"
+echo " Config Path:      $CONFIG"
+echo " Content Title:    $TITLE"
+echo " XDebug Enabled:   ${DEBUG:-off}"
+echo " AI Enabled:       ${AI_ENABLE:-off}"
 echo "========================================"
 echo ""
 # ─── Run ───

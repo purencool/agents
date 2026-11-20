@@ -9,18 +9,21 @@
 
 declare(strict_types=1);
 
-
 namespace App\Console\Commands\Pnc;
 
+use App\PncAgentics\Contracts\SkillRegistryInterface;
 use Illuminate\Console\Command;
 
 /**
- * Artisan command that displays the raw markdown content of a single AI Agent skill.
+ * Artisan command that displays AI Agent skills.
  *
- * Reads the skill registry from config('pnc.skills') (populated by
- * PncAgenticsServiceProvider) and prints the file contents for the
- * requested dot-notation key.
+ * With no argument, lists all registered skills in a table.
+ * With a dot-notation key, prints the raw markdown content of that skill.
  *
+ * Delegates all skill resolution to SkillRegistryInterface, keeping
+ * this command as a pure display layer.
+ *
+ * @example php artisan pnc:agent:skills:show
  * @example php artisan pnc:agent:skills:show developer_docs.core_writing.hook_introduction_writer
  */
 class AIAgentSkillsShow extends Command
@@ -28,49 +31,85 @@ class AIAgentSkillsShow extends Command
     /**
      * The name and signature of the console command.
      *
-     * Uses a positional {skill} argument (not an option) for faster typing.
-     *
      * @var string
      */
-    protected $signature = "pnc:agent:skills:show {skill : The dot-notated path of the skill to show}";
+    protected $signature = "pnc:agent:skills:show {skill? : The dot-notation key of the skill to show (omit to list all)}";
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = "Show the markdown content of a specific AI Agent skill.";
+    protected $description = "List all AI Agent skills or show the markdown content of a specific skill.";
+
+    /**
+     * @param SkillRegistryInterface $registry The skill registry service.
+     */
+    public function __construct(protected SkillRegistryInterface $registry)
+    {
+        parent::__construct();
+    }
 
     /**
      * Execute the console command.
      *
-     * Resolves the skill key from config('pnc.skills') and prints its
-     * raw markdown content. Returns FAILURE if the skills registry is
-     * empty or the requested key does not exist.
+     * If no skill key is provided, renders a table of all registered skills
+     * with their keys and content sizes. If a key is provided, prints the
+     * raw markdown content for that skill.
      *
      * @return int Command::SUCCESS (0) or Command::FAILURE (1).
      */
     public function handle(): int
     {
-        $skillRequest = $this->argument("skill");
-        $skills = config("pnc.skills");
+        $skills = $this->registry->all();
 
         if (empty($skills)) {
-            $this->error(
-                "No skills found. Ensure PncAgenticsServiceProvider is registered.",
-            );
+            $this->error("No skills found. Ensure PncAgenticsServiceProvider is registered.");
             return self::FAILURE;
         }
 
-        if (!array_key_exists($skillRequest, $skills)) {
-            $this->error("Skill '{$skillRequest}' not found.");
-            $this->info(
-                "Tip: Use 'php artisan agent:skills' to see a list of available skills.",
-            );
+        $skillKey = $this->argument("skill");
+
+        // No argument — list all skills
+        if ($skillKey === null) {
+            return $this->listAll($skills);
+        }
+
+        // Specific skill requested
+        $content = $this->registry->get($skillKey);
+
+        if ($content === null) {
+            $this->error("Skill '{$skillKey}' not found.");
+            $this->info("Tip: Run 'php artisan pnc:agent:skills:show' (no argument) to list all skills.");
             return self::FAILURE;
         }
 
-        $this->line($skills[$skillRequest]);
+        $this->line($content);
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Render a table of all registered skills.
+     *
+     * @param array<string, string> $skills Map of skill key to content.
+     *
+     * @return int Always Command::SUCCESS.
+     */
+    protected function listAll(array $skills): int
+    {
+        $this->info("Available skills ({$count = count($skills)}):");
+        $this->newLine();
+
+        $rows = [];
+        foreach ($skills as $key => $content) {
+            $rows[] = [$key, strlen($content) . " chars"];
+        }
+
+        $this->table(["Key", "Size"], $rows);
+
+        $this->newLine();
+        $this->info("Usage: php artisan pnc:agent:skills:show <key>");
 
         return self::SUCCESS;
     }

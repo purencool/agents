@@ -25,6 +25,8 @@ use App\PncAgentics\Services\AgentService;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use App\PncAgentics\Services\SkillRegistry;
+use App\PncAgentics\Contracts\SkillRegistryInterface;
 
 /**
  * Service provider for the PncAgentics module.
@@ -47,12 +49,12 @@ class PncAgenticsServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(AgentServiceInterface::class, AgentService::class);
-
         $this->app->bind(AgentDataInterface::class, AgentDataService::class);
+        $this->app->bind(AgentServiceInterface::class, AgentService::class);
         $this->app->bind(SkillExecutorInterface::class, function ($app) {
             return new AuditedSkillExecutor($app->make(SkillExecutor::class));
         });
+        $this->app->bind(SkillRegistryInterface::class, SkillRegistry::class);
 
         $this->app->bind(
             WorkflowFactoryInterface::class,

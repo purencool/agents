@@ -9,31 +9,36 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Feature\Console\Commands\Pnc;
 
+use App\PncAgentics\Contracts\SkillRegistryInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
  * Feature tests for {@see \App\Console\Commands\Pnc\AIAgentSkillsShow}.
  *
- * Verifies:
- *  - FAILURE when the skills registry is empty or null.
+ * Verifies the command's behaviour when the SkillRegistryInterface is
+ * mocked to return various states:
+ *
+ *  - FAILURE when the registry is empty.
  *  - FAILURE with a helpful tip when the skill key is not found.
  *  - SUCCESS and correct output when the skill exists.
+ *  - SUCCESS when no argument is provided (lists all skills).
  *  - Edge cases: empty-string content, special characters in keys.
+ *
+ * @covers \App\Console\Commands\Pnc\AIAgentSkillsShow
  */
 class AIAgentSkillsShowTest extends TestCase
 {
     /**
-     * When config('pnc.skills') is an empty array, the command should
+     * When the registry returns an empty array, the command should
      * error and return FAILURE.
      */
     #[Test]
     public function handle_failsWhenNoSkillsLoaded(): void
     {
-        config()->set("pnc.skills", []);
+        $this->mockRegistry([]);
 
         $this->artisan("pnc:agent:skills:show", ["skill" => "any.skill"])
             ->expectsOutputToContain("No skills found")
@@ -41,13 +46,17 @@ class AIAgentSkillsShowTest extends TestCase
     }
 
     /**
-     * When config('pnc.skills') is null, the command should also fail
-     * gracefully (empty() catches null).
+     * When the registry returns null (simulating a misconfigured provider),
+     * the command should also fail gracefully.
+     *
+     * Note: SkillRegistryInterface::all() is typed to return array, so in
+     * practice this state is caught by the type system. This test documents
+     * the intent that the command handles the empty case.
      */
     #[Test]
     public function handle_failsWhenSkillsConfigIsNull(): void
     {
-        config()->set("pnc.skills", null);
+        $this->mockRegistry([]);
 
         $this->artisan("pnc:agent:skills:show", ["skill" => "any.skill"])
             ->expectsOutputToContain("No skills found")
@@ -61,13 +70,14 @@ class AIAgentSkillsShowTest extends TestCase
     #[Test]
     public function handle_failsWhenSkillNotFound(): void
     {
-        config()->set("pnc.skills", [
-            "known.skill" => "Known content",
-        ]);
+        $this->mockRegistry(
+            skills: ["known.skill" => "Known content"],
+            getReturns: null,
+        );
 
         $this->artisan("pnc:agent:skills:show", ["skill" => "unknown.skill"])
             ->expectsOutputToContain("Skill 'unknown.skill' not found.")
-            ->expectsOutputToContain("Tip: Use 'php artisan agent:skills'")
+            ->expectsOutputToContain("php artisan pnc:agent:skills:show")
             ->assertFailed();
     }
 
@@ -78,10 +88,13 @@ class AIAgentSkillsShowTest extends TestCase
     #[Test]
     public function handle_printsSkillContentOnSuccess(): void
     {
-        config()->set("pnc.skills", [
-            "developer_docs.core_writing.hook_writer" =>
-                "You are a skilled hook writer.",
-        ]);
+        $this->mockRegistry(
+            skills: [
+                "developer_docs.core_writing.hook_writer" =>
+                    "You are a skilled hook writer.",
+            ],
+            getReturns: "You are a skilled hook writer.",
+        );
 
         $this->artisan("pnc:agent:skills:show", [
             "skill" => "developer_docs.core_writing.hook_writer",
@@ -92,14 +105,12 @@ class AIAgentSkillsShowTest extends TestCase
 
     /**
      * A skill key that exists but maps to an empty string should still
-     * succeed (array_key_exists passes, empty() is not used for lookup).
+     * succeed (get() returns "", not null).
      */
     #[Test]
     public function handle_succeedsForEmptySkillContent(): void
     {
-        config()->set("pnc.skills", [
-            "empty.skill" => "",
-        ]);
+        $this->mockRegistry(skills: ["empty.skill" => ""], getReturns: "");
 
         $this->artisan("pnc:agent:skills:show", [
             "skill" => "empty.skill",
@@ -113,9 +124,10 @@ class AIAgentSkillsShowTest extends TestCase
     #[Test]
     public function handle_resolvesKeysWithSpecialCharacters(): void
     {
-        config()->set("pnc.skills", [
-            "track-2.core_writing.v3.writer" => "Special key content",
-        ]);
+        $this->mockRegistry(
+            skills: ["track-2.core_writing.v3.writer" => "Special key content"],
+            getReturns: "Special key content",
+        );
 
         $this->artisan("pnc:agent:skills:show", [
             "skill" => "track-2.core_writing.v3.writer",
@@ -131,14 +143,74 @@ class AIAgentSkillsShowTest extends TestCase
     #[Test]
     public function handle_requiresExactKeyMatch(): void
     {
-        config()->set("pnc.skills", [
-            "blog_posts.style_guide" => "Full content here",
-            "blog_posts.style" => "Different skill",
-        ]);
+        $this->mockRegistry(
+            skills: [
+                "blog_posts.style_guide" => "Full content here",
+                "blog_posts.style" => "Different skill",
+            ],
+            getReturns: "Different skill",
+        );
 
-        // "blog_posts.style" exists, so this should succeed.
         $this->artisan("pnc:agent:skills:show", ["skill" => "blog_posts.style"])
             ->expectsOutputToContain("Different skill")
             ->assertSuccessful();
+    }
+
+    /**
+     * When no skill argument is provided, the command should list all
+     * skills in a table and return SUCCESS.
+     */
+    #[Test]
+    public function handle_listsAllSkillsWhenNoArgumentProvided(): void
+    {
+        $this->mockRegistry(
+            skills: [
+                "track.core_writing.hook_writer" => "Hook content",
+                "track.core_writing.body_writer" => "Body content",
+            ],
+        );
+
+        $this->artisan("pnc:agent:skills:show")
+            ->expectsOutputToContain("Available skills (2):")
+            ->expectsOutputToContain("track.core_writing.hook_writer")
+            ->expectsOutputToContain("track.core_writing.body_writer")
+            ->assertSuccessful();
+    }
+
+    /**
+     * When no argument is provided and the registry is empty, the command
+     * should still report "No skills found" and fail.
+     */
+    #[Test]
+    public function handle_failsWhenListingWithEmptyRegistry(): void
+    {
+        $this->mockRegistry([]);
+
+        $this->artisan("pnc:agent:skills:show")
+            ->expectsOutputToContain("No skills found")
+            ->assertFailed();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Bind a mock SkillRegistryInterface into the application container.
+     *
+     * @param array<string, string> $skills     The array returned by all().
+     * @param string|null           $getReturns The value returned by get().
+     *                                          Defaults to null (not found).
+     */
+    private function mockRegistry(
+        array $skills = [],
+        ?string $getReturns = null,
+    ): void {
+        $mock = $this->mock(SkillRegistryInterface::class);
+
+        $mock->method("all")->willReturn($skills);
+        $mock->method("get")->willReturn($getReturns);
+
+        $this->app->instance(SkillRegistryInterface::class, $mock);
     }
 }

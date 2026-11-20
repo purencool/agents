@@ -9,19 +9,21 @@
 
 declare(strict_types=1);
 
-
 namespace App\Console\Commands\Pnc;
 
+use App\PncAgentics\Contracts\SkillRegistryInterface;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\File;
+use InvalidArgumentException;
 
 /**
- * Artisan command that updates or creates a markdown skill file on disk.
+ * Artisan command that creates or updates a markdown skill file on disk.
  *
  * Accepts a JSON payload via --input with "skill" (dot-notation key) and
- * "content" (markdown string). Converts the dot-notation key to a file
- * path under app/PncAgentics/Skills/, creates intermediate directories
- * if needed, and writes the content.
+ * "content" (markdown string). Delegates all file resolution, directory
+ * creation, and persistence to SkillRegistryInterface.
+ *
+ * If the skill key already exists, the content is updated.
+ * If the skill key does not exist, a new skill is created.
  *
  * @example php artisan pnc:agent:skills:update --input='{"skill":"communications_pr.internal_communications.skills","content":"You are an AI assistant for internal communications."}'
  */
@@ -39,14 +41,22 @@ class AIAgentSkillsUpdate extends Command
      *
      * @var string
      */
-    protected $description = "Update or create the markdown content of an AI Agent skill.";
+    protected $description = "Create or update the markdown content of an AI Agent skill.";
+
+    /**
+     * @param SkillRegistryInterface $registry The skill registry service.
+     */
+    public function __construct(protected SkillRegistryInterface $registry)
+    {
+        parent::__construct();
+    }
 
     /**
      * Execute the console command.
      *
-     * Validates the JSON input, resolves the dot-notation skill key to a
-     * file path, creates parent directories if necessary, and writes the
-     * markdown content.
+     * Validates the JSON input, then delegates to SkillRegistryInterface:
+     *  - If the skill key already exists, calls update().
+     *  - If the skill key does not exist, calls create().
      *
      * @return int Command::SUCCESS (0) or Command::FAILURE (1).
      */
@@ -81,25 +91,21 @@ class AIAgentSkillsUpdate extends Command
             return self::FAILURE;
         }
 
-        $relativePath =
-            str_replace(".", DIRECTORY_SEPARATOR, $skillName) . ".md";
+        try {
+            if ($this->registry->get($skillName) !== null) {
+                $this->registry->update($skillName, $content);
+                $this->info("Successfully updated skill: {$skillName}");
+            } else {
+                $this->registry->create($skillName, $content);
+                $this->info("Successfully created skill: {$skillName}");
+            }
 
-        $basePath = app_path("PncAgentics/Skills");
-        $fullPath = $basePath . DIRECTORY_SEPARATOR . $relativePath;
-
-        $directory = dirname($fullPath);
-        if (!File::isDirectory($directory)) {
-            File::makeDirectory($directory, 0755, true, true);
-        }
-
-        $success = File::put($fullPath, $content);
-
-        if ($success !== false) {
-            $this->info("Successfully updated skill: {$skillName}");
-            $this->line("File saved at: {$fullPath}");
             return self::SUCCESS;
-        } else {
-            $this->error("Failed to write to file: {$fullPath}");
+        } catch (InvalidArgumentException $e) {
+            $this->error($e->getMessage());
+            return self::FAILURE;
+        } catch (\RuntimeException $e) {
+            $this->error("Failed to write skill: {$e->getMessage()}");
             return self::FAILURE;
         }
     }

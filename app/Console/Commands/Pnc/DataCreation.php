@@ -33,7 +33,7 @@ class DataCreation extends Command
         $this->info("Creating structure: {$config["title"]}");
 
         // Use the method variable injection directly
-        $structure = $agentData->executeFullCreationPipeline($config);
+        $structure = $agentData->executeCreationPipeline($config);
 
         // Dig into the 'structure' key returned by your service pipeline
         $pipelineStructure = $structure["structure"] ?? [];

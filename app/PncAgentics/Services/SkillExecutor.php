@@ -19,11 +19,25 @@ use InvalidArgumentException;
 
 /**
  * Executes AI-powered skill prompts by resolving markdown skill files,
- * compiling template placeholders, and delegating to an AI service.
+ * compiling template placeholders, and delegating to the agent service.
+ *
+ * Request model:
+ *  Each LLM call is constructed as a structured array with explicit keys:
+ *
+ *    [
+ *        "system_prompt" => string,   // Skill file content (role, protocol, rules)
+ *        "user_prompt"   => string,   // Data payload (variables, context to process)
+ *        "temperature"   => float,    // Sampling temperature (0.0 – 2.0)
+ *        "max_tokens"    => int,      // Maximum response tokens
+ *        "metadata"      => array,    // Arbitrary context for logging/tracing
+ *    ]
+ *
+ *  The system prompt defines HOW the model behaves (stable, per-skill).
+ *  The user prompt contains WHAT the model operates on (variable data).
  *
  * Supports both single-skill execution and "grouped block" execution,
  * where multiple sub-agent skill files are aggregated into a single
- * combined prompt before being sent to the LLM.
+ * combined system prompt before being sent to the LLM.
  */
 class SkillExecutor implements SkillExecutorInterface
 {
@@ -44,8 +58,8 @@ class SkillExecutor implements SkillExecutorInterface
      *
      * If the key matches a known "grouped block" pattern (batch_draft_engine
      * or batch_expand_engine), the method aggregates multiple sub-agent
-     * skill files into a single combined prompt. Otherwise, it resolves a
-     * single skill file and processes it directly.
+     * skill files into a single combined system prompt. Otherwise, it
+     * resolves a single skill file and processes it directly.
      *
      * @param string $skillKey    Dot-notation key identifying the skill (e.g. "track.core_writing.body_content.topic_sentence_opener.skills").
      * @param array  $variables   Template variables for placeholder substitution and contextual data.
@@ -82,7 +96,7 @@ class SkillExecutor implements SkillExecutorInterface
 
     /**
      * Execute a grouped block by aggregating multiple sub-agent skill files
-     * into a single combined prompt.
+     * into a single combined system prompt.
      *
      * For "batch_draft_engine" keys, aggregates Phase A sub-agents:
      *   - topic_sentence_opener
@@ -142,7 +156,7 @@ class SkillExecutor implements SkillExecutorInterface
                     ucwords(str_replace("_", " ", $agentName)) .
                     "\n";
                 $aggregatedInstructions .= trim($cleanContent) . "\n\n";
-            } catch (\Exception $e) {
+            } catch (\Exception) {
                 // Silently skip sub-agents whose skill files cannot be resolved.
                 continue;
             }
@@ -242,13 +256,20 @@ class SkillExecutor implements SkillExecutorInterface
     }
 
     /**
-     * Compile the prompt payload, invoke the AI service, and return the result.
+     * Compile the prompt payload, invoke the agent service, and return the result.
      *
      * Builds the final prompt by combining compiled system instructions with
-     * contextual variable data, then delegates to the AI service with the
-     * configured temperature, max tokens, and metadata.
+     * contextual variable data, then delegates to the agent service as a
+     * single structured array.
      *
-     * Logs an error if the AI service returns a non-string value.
+     * The request array passed to AgentServiceInterface::complete() contains:
+     *  - "system_prompt": The compiled skill instructions (role, protocol, rules).
+     *  - "user_prompt":   The data payload (variables, context to process).
+     *  - "temperature":   Sampling temperature from SkillOptions.
+     *  - "max_tokens":    Maximum response tokens from SkillOptions.
+     *  - "metadata":      Application-level context for logging/tracing.
+     *
+     * Logs an error if the agent service returns a non-string value.
      *
      * @param string $skillKey     The skill key being executed (for metadata).
      * @param string $instructions Raw system instructions / prompt template.
@@ -277,10 +298,11 @@ class SkillExecutor implements SkillExecutorInterface
             $variables,
         );
 
-        $result = $this->aiService->complete($promptPayload, [
+        $result = $this->aiService->complete([
+            "system_prompt" => $compiledInstructions,
+            "user_prompt" => $promptPayload,
             "temperature" => $configOptions->temperature,
             "max_tokens" => $configOptions->maxTokens,
-            "system" => $compiledInstructions,
             "metadata" => [
                 "skill_executed" => $skillKey,
                 "resolved_file" => $source,
@@ -289,11 +311,14 @@ class SkillExecutor implements SkillExecutorInterface
         ]);
 
         if (!is_string($result)) {
-            Log::error("🤖 [processLLMCall] Non-string return detected", [
-                "skill" => $skillKey,
-                "type" => gettype($result),
-                "value" => var_export($result, true),
-            ]);
+            Log::error(
+                "SkillExecutor::processLLMCall — non-string return detected",
+                [
+                    "skill" => $skillKey,
+                    "type" => gettype($result),
+                    "value" => var_export($result, true),
+                ],
+            );
         }
 
         return $result;
@@ -329,7 +354,7 @@ class SkillExecutor implements SkillExecutorInterface
     }
 
     /**
-     * Build the full prompt payload sent to the AI service.
+     * Build the full prompt payload sent as the user_prompt to the agent service.
      *
      * The payload is structured in three sections:
      *  1. SYSTEM ROLE & SKILL PROTOCOLS – the compiled instructions.

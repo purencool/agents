@@ -198,11 +198,11 @@ class AgentDataServiceTest extends TestCase
     }
 
     /**
-     * Verifies that executeFullCreationPipeline() calls createStructure
+     * Verifies that executeCreationPipeline() calls createStructure
      * and runResearch in sequence, wrapping the result under the "structure" key.
      */
     #[Test]
-    public function executeFullCreationPipeline_calls_createStructure_and_research(): void
+    public function executeCreationPipeline_calls_createStructure_and_research(): void
     {
         $this->createStructureAction
             ->shouldReceive("execute")
@@ -228,7 +228,7 @@ class AgentDataServiceTest extends TestCase
             ->with($this->mockStructure)
             ->andReturn($this->mockStructure);
 
-        $result = $this->service->executeFullCreationPipeline($this->payload);
+        $result = $this->service->executeCreationPipeline($this->payload);
 
         $this->assertArrayHasKey("structure", $result);
         $this->assertSame($this->mockStructure, $result["structure"]);
@@ -236,12 +236,12 @@ class AgentDataServiceTest extends TestCase
     }
 
     /**
-     * Verifies that executeFullCreationPipeline() does NOT call the
+     * Verifies that executeCreationPipeline() does NOT call the
      * downstream stages (workflow, template, save) while they
      * are still commented out.
      */
     #[Test]
-    public function executeFullCreationPipeline_does_not_call_uncommented_stages(): void
+    public function executeCreationPipeline_does_not_call_uncommented_stages(): void
     {
         $this->createStructureAction
             ->shouldReceive("execute")
@@ -264,7 +264,7 @@ class AgentDataServiceTest extends TestCase
             ->once()
             ->andReturn($this->mockStructure);
 
-        $result = $this->service->executeFullCreationPipeline($this->payload);
+        $result = $this->service->executeCreationPipeline($this->payload);
 
         $this->assertArrayHasKey("structure", $result);
     }

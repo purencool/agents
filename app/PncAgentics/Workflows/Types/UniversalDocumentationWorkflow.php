@@ -74,7 +74,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
                 "\n\n## Research Findings\n" . $track["research_text"];
 
             $rawOutline = $this->executor->execute(
-                "{$baseSkillKey}.research_preparation.outline_generator.skills",
+                "research_preparation.outline_generator.skills",
                 [
                     "title" => $title,
                     "description" => $description,
@@ -84,7 +84,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
             );
 
             $sectionsJson = $this->executor->execute(
-                "{$baseSkillKey}.orchestration.document_orchestrator.skills",
+                "orchestration.document_orchestrator.skills",
                 [
                     "outline" => $rawOutline,
                     "format_instruction" =>
@@ -102,7 +102,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
 
             foreach ($sections as $sectionTitle) {
                 $coreDraft = $this->executor->execute(
-                    "{$baseSkillKey}.core_writing.body_content.batch_draft_engine.skills",
+                    "core_writing.body_content.batch_draft_engine.skills",
                     [
                         "section" => $sectionTitle,
                         "outline" => $rawOutline,
@@ -112,7 +112,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
                 );
 
                 $insightContent = $this->executor->execute(
-                    "{$baseSkillKey}.core_writing.body_content.analogy_example_creator.skills",
+                    "core_writing.body_content.analogy_example_creator.skills",
                     [
                         "section" => $sectionTitle,
                         "content" => $coreDraft,
@@ -122,7 +122,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
                 );
 
                 $critiqueContent = $this->executor->execute(
-                    "{$baseSkillKey}.core_writing.body_content.counter_argument_builder.skills",
+                    "core_writing.body_content.counter_argument_builder.skills",
                     [
                         "section" => $sectionTitle,
                         "content" => $insightContent,
@@ -132,7 +132,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
                 );
 
                 $valueContent = $this->executor->execute(
-                    "{$baseSkillKey}.core_writing.body_content.batch_expand_engine.skills",
+                    "core_writing.body_content.batch_expand_engine.skills",
                     [
                         "section" => $sectionTitle,
                         "content" => $critiqueContent,
@@ -156,7 +156,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
             }
 
             $introduction = $this->executor->execute(
-                "{$baseSkillKey}.core_writing.hook_introduction_writer.skills",
+                "core_writing.hook_introduction_writer.skills",
                 [
                     "title" => $title,
                     "description" => $description,
@@ -167,7 +167,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
             );
 
             $conclusion = $this->executor->execute(
-                "{$baseSkillKey}.core_writing.conclusion_writer.skills",
+                "core_writing.conclusion_writer.skills",
                 [
                     "introduction" => $introduction,
                     "body" => $bodyCanvas,
@@ -180,7 +180,7 @@ class UniversalDocumentationWorkflow implements WorkflowInterface
             $masterDraft = "# {$title}\n\n{$introduction}\n\n{$bodyCanvas}\n\n## Conclusion\n\n{$conclusion}";
 
             $output = $this->executor->execute(
-                "{$baseSkillKey}.review_refinement.formatting_markdown_expert.skills",
+                "review_refinement.formatting_markdown_expert.skills",
                 [
                     "content" => $masterDraft,
                     "refinement_context" => $refinementContext,

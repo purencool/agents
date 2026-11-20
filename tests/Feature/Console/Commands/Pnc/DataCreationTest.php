@@ -95,7 +95,7 @@ class DataCreationTest extends TestCase
         $json = json_encode($this->payload);
 
         $this->agentData
-            ->shouldReceive("executeFullCreationPipeline")
+            ->shouldReceive("executeCreationPipeline")
             ->once()
             ->with($this->payload)
             ->andReturn([
@@ -125,7 +125,7 @@ class DataCreationTest extends TestCase
         $json = json_encode($this->payload);
 
         $this->agentData
-            ->shouldReceive("executeFullCreationPipeline")
+            ->shouldReceive("executeCreationPipeline")
             ->once()
             ->withArgs(function (array $config) {
                 return isset(
@@ -168,7 +168,7 @@ class DataCreationTest extends TestCase
         $json = json_encode($this->payload);
 
         $this->agentData
-            ->shouldReceive("executeFullCreationPipeline")
+            ->shouldReceive("executeCreationPipeline")
             ->once()
             ->andReturn([
                 "structure" => ["uuid" => "xyz-789"],

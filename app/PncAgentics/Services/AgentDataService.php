@@ -126,7 +126,7 @@ class AgentDataService implements AgentDataInterface
      *
      * @todo Uncomment and wire up remaining stages (workflow, template, save).
      */
-    public function executeFullCreationPipeline(array $data): array
+    public function executeCreationPipeline(array $data): array
     {
         $structure = $this->createStructure($data);
         $research = $this->runResearch($structure);
