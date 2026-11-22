@@ -16,85 +16,44 @@ use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
- * Runs research content generation for each track in the structure.
+ * Gathers research content for each track in an agent structure.
  *
- * Iterates over the tracks returned by {@see CreateAgentStructureAction}
- * and calls {@see ResearchGatherer::gather()} for each, storing the
- * combined research text alongside the track metadata.
- *
- * @see \App\PncAgentics\Workflows\ResearchGatherer
+ * Iterates over the tracks defined by CreateAgentStructureAction, calls
+ * ResearchGatherer::gather() once per track with the track's domain and
+ * the shared research_dir, then stores the result under "research_text"
+ * in each track entry.
  */
 class ResearchAgentContentAction
 {
-    public function __construct(private readonly ResearchGatherer $gatherer) {}
+    /**
+     * @param ResearchGatherer $gatherer The research gatherer service.
+     */
+    public function __construct(protected ResearchGatherer $gatherer) {}
 
     /**
-     * Executes research gathering for every track in the structure.
+     * Execute the research gathering for all tracks in the structure.
      *
-     * For each track, builds a payload from the track's domain and the
-     * structure's title, then calls the gatherer with the research directory.
-     * @todo UpdateAgentStructureAction::execute().
-     *
-     * @param array[
+     * @param array{
      *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
      *     domain_dir: string,
      *     assets_dir: string,
      *     research_dir: string,
-     *     title: string,
-     *     title_slug: string,
-     *     tracks: array<string, array[
-     *         domain: string,
-     *         type: string,
-     *         template: string,
-     *         track: string,
-     *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
-     *         content_json: string,
-     *         content_md: string,
-     *         description_md: string
-     *     ],
-     * ] $structure Return value from {@see CreateAgentStructureAction::execute()}.
+     *     tracks: array<string, array{domain: string, ...}>
+     * } $structure The agent structure from CreateAgentStructureAction.
      *
-     * @return array{
-     *     uuid: string,
-     *     domain_dir: string,
-     *     assets_dir: string,
-     *     research_dir: string,
-     *     title: string,
-     *     title_slug: string,
-     *     tracks: array<string, array{
-     *         domain: string,
-     *         type: string,
-     *         template: string,
-     *         track: string,
-     *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
-     *         content_json: string,
-     *         content_md: string,
-     *         description_md: string,
-     *         research_text: string
-     *     }>
-     * }
+     * @return array The structure with "research_text" added to each track.
      *
-     * @throws RuntimeException If the structure is missing the "research_dir" key.
+     * @throws RuntimeException When "research_dir" is missing from the structure.
      */
     public function execute(array $structure): array
     {
-        Log::channel("daily")->info(
-            " [RESEARCH STARTED] tracks=" . count($structure["tracks"]),
-            [
-                "uuid" => $structure["uuid"],
-                "title" => $structure["title"],
-                "tracks" => array_keys($structure["tracks"]),
-            ],
-        );
-
         $researchDir = $structure["research_dir"] ?? null;
+
         if ($researchDir === null) {
             throw new RuntimeException(
-                "Structure is missing 'research_dir' key.",
+                "Agent structure is missing 'research_dir' key.",
             );
         }
 

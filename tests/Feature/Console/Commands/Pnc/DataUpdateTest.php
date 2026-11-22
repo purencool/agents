@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Feature\Console\Commands\Pnc;
 
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
@@ -30,7 +29,7 @@ use Tests\TestCase;
  *  - Correct output formatting (domain, title, separators, duration).
  *  - Log output to the "daily" channel on completion.
  */
-class DataUpdateCommandTest extends TestCase
+class DataUpdateTest extends TestCase
 {
     /**
      * Mock for the template transformer.
@@ -155,7 +154,7 @@ class DataUpdateCommandTest extends TestCase
             ->expectsOutputToContain("Title:  Test Article")
             ->expectsOutputToContain("Processing update for track [blog]")
             ->expectsOutputToContain("Processing update for track [social]")
-            ->expectsOutputToContain("✓ Updated: /out/track")
+            ->expectsOutputToContain("Updated: /out/track")
             ->expectsOutputToContain("Batch update pipeline completed in")
             ->assertSuccessful();
     }
@@ -221,9 +220,9 @@ class DataUpdateCommandTest extends TestCase
                 ],
             ]),
         ])
-            ->expectsOutputToContain("✓ Updated: /out/good")
+            ->expectsOutputToContain("Updated: /out/good")
             ->expectsOutputToContain("Skipped [bad_track]: Template not found")
-            ->expectsOutputToContain("✓ Updated: /out/another")
+            ->expectsOutputToContain("Updated: /out/another")
             ->expectsOutputToContain("Batch update pipeline completed in")
             ->assertSuccessful();
     }

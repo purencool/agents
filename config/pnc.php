@@ -24,4 +24,7 @@ return [
     "logging" => [
         "channel" => env("PNC_LOG_CHANNEL", "stack"),
     ],
+    "workflows" => [
+        "override_dir" => env("OVERLAY_WORKFLOWS"),
+    ],
 ];

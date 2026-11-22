@@ -50,7 +50,7 @@ class SkillRegistry implements SkillRegistryInterface
      */
     public function all(): array
     {
-        return config("pnc.skills");
+        return $this->getSkills();
     }
 
     /**

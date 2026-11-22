@@ -41,7 +41,7 @@ class PncServicesServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->mergeConfigFrom(
-            __DIR__ . "/../../config/pncservices.php",
+            __DIR__ . "/../../config/pnc.php",
             "pncservices",
         );
     }
