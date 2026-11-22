@@ -58,11 +58,25 @@ class SkillRegistry implements SkillRegistryInterface
      *
      * @param string $key Dot-notation skill key.
      *
-     * @return string|null The skill's markdown content, or null if not found.
+     * @return array|null The skill's markdown content, or null if not found.
      */
-    public function get(string $key): ?string
+    public function get(string $skillName): ?array
     {
-        return config("pnc.skills")[$key] ?? null;
+        $skills = $this->getSkills();
+        $skill = $skills[$skillName] ?? null;
+
+        if ($skill === null) {
+            return null;
+        }
+
+        if (!is_array($skill)) {
+            throw new \InvalidArgumentException(
+                "Skill '{$skillName}' has invalid definition: expected array, got " .
+                    gettype($skill),
+            );
+        }
+
+        return $skill;
     }
 
     /**
@@ -85,12 +99,15 @@ class SkillRegistry implements SkillRegistryInterface
             );
         }
 
-        $skills = config("pnc.skills");
-        $skills[$key] = $content;
+        $skills = $this->getSkills();
+        $skills[$key] = [
+            "name" => $key,
+            "system_instructions" => $content,
+        ];
         config()->set("pnc.skills", $skills);
 
         $path = $this->keyToPath($key);
-        File::makeDirectory(dirname($path), 0755, true);
+        File::makeDirectory(dirname($path), 0755, true, true);
         File::put($path, $content);
     }
 
@@ -113,11 +130,12 @@ class SkillRegistry implements SkillRegistryInterface
             );
         }
 
-        $skills = config("pnc.skills");
-        $skills[$key] = $content;
+        $skills = $this->getSkills();
+        $skills[$key]["system_instructions"] = $content;
         config()->set("pnc.skills", $skills);
 
-        File::put($this->keyToPath($key), $content);
+        $path = $this->keyToPath($key);
+        File::put($path, $content);
     }
 
     /**
@@ -136,7 +154,7 @@ class SkillRegistry implements SkillRegistryInterface
             );
         }
 
-        $skills = config("pnc.skills");
+        $skills = $this->getSkills();
         unset($skills[$key]);
         config()->set("pnc.skills", $skills);
 
@@ -166,5 +184,19 @@ class SkillRegistry implements SkillRegistryInterface
 
         $relative = str_replace(".", DIRECTORY_SEPARATOR, $key) . ".md";
         return app_path("PncAgentics/Skills/" . $relative);
+    }
+
+    /**
+     * Resolve the skills array from config (handles the lazy closure).
+     *
+     * @return array<string, array>
+     */
+    private function getSkills(): array
+    {
+        $skills = config("pnc.skills");
+        if ($skills instanceof \Closure) {
+            $skills = $skills();
+        }
+        return $skills;
     }
 }

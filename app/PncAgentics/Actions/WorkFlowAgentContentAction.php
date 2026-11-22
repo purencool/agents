@@ -1,89 +1,101 @@
 <?php
 
-/**
- * @package     purencool/agent
- *
- * @copyright   Copyright (C) Purencool. All rights reserved.
- * @license     GNU General Public License version 2 or later; see LICENSE
- */
-
 declare(strict_types=1);
 
 namespace App\PncAgentics\Actions;
 
-use App\PncAgentics\Workflows\Types\SocialMediaWorkflow;
-use App\PncAgentics\Workflows\Types\UniversalDocumentationWorkflow;
+use App\PncAgentics\Workflows\JsonWorkflowExecutor;
 
 /**
- * Resolves the appropriate workflow and delegates the full structure to it.
+ * Resolves the correct workflow for a content structure and executes it.
  *
- * This action performs no data transformation. It inspects the first track's
- * "workflow" field to select the correct workflow instance, then passes
- * the entire structure array directly to the workflow.
+ * Reads the "workflow" field from the first track in the structure, maps it
+ * to a workflow definition filename, and delegates execution to
+ * {@see JsonWorkflowExecutor}. The resulting content string is stored in the
+ * structure's "content" key for downstream templating.
  *
- * Workflow selection:
- *  - "default" or empty string → {@see UniversalDocumentationWorkflow}
- *  - "social_media"            → {@see SocialMediaWorkflow}
- *  - anything else             → {@see UniversalDocumentationWorkflow} (fallback)
+ * Workflow resolution:
+ *  - "social_media"  → "social_media.json"
+ *  - anything else   → "universal_documentation.json" (default)
+ *
+ * The context passed to the executor is built from the structure's top-level
+ * fields and the first track's track-specific fields (research_text, type, lang).
+ *
+ * @example
+ *   $action = app(WorkFlowAgentContentAction::class);
+ *   $structure = $action->execute($structure);
+ *   // $structure["content"] now contains the generated markdown.
  */
 class WorkFlowAgentContentAction
 {
-    public function __construct(
-        private readonly UniversalDocumentationWorkflow $universalWorkflow,
-        private readonly SocialMediaWorkflow $socialMediaWorkflow,
-    ) {}
+    public function __construct(private JsonWorkflowExecutor $executor) {}
 
     /**
-     * Resolves the workflow and executes it with the full structure.
+     * Execute the resolved workflow and attach the output to the structure.
      *
-     * @param array{
-     *     uuid: string,
-     *     domain_dir: string,
-     *     assets_dir: string,
-     *     research_dir: string,
-     *     title: string,
-     *     title_slug: string,
-     *     tracks: array<string, array{
-     *         domain: string,
-     *         type: string,
-     *         template: string,
-     *         track: string,
-     *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
-     *         content_json: string,
-     *         content_md: string,
-     *         description_md: string,
-     *         research_text: string
-     *     }>
-     * } $structure
+     * The structure is returned with a new "content" key containing the
+     * workflow's final output string. All other keys are passed through
+     * unmodified.
      *
-     * @return array<string, mixed> The structure unmodified (the workflow
-     *                              saves output to disk internally).
+     * @param array<string, mixed> $structure The full content structure
+     *                                         (uuid, title, tracks, etc.).
+     *
+     * @return array<string, mixed> The same structure with "content" added.
      */
     public function execute(array $structure): array
     {
-        $firstTrackKey = array_key_first($structure["tracks"]);
-        $workflow = $this->resolveWorkflow(
-            $structure["tracks"][$firstTrackKey]["workflow"],
-        );
+        $workflowKey = $this->resolveWorkflowKey($structure);
 
-        $structure["content"] = $workflow->execute($structure);
+        $structure["content"] = $this->executor->execute(
+            $workflowKey,
+            $this->buildContext($structure),
+        );
 
         return $structure;
     }
 
     /**
-     * Maps the workflow identifier to the concrete workflow instance.
+     * Map the first track's "workflow" field to a workflow definition name.
      *
-     * @param string $workflowIdentifier Value of the track's "workflow" field.
+     * @param array<string, mixed> $structure
+     *
+     * @return string The workflow filename (without .json) to load.
      */
-    private function resolveWorkflow(string $workflowIdentifier): object
+    private function resolveWorkflowKey(array $structure): string
     {
-        return match (trim($workflowIdentifier)) {
-            "", "default" => $this->universalWorkflow,
-            "social_media" => $this->socialMediaWorkflow,
-            default => $this->universalWorkflow,
+        $firstTrack = reset($structure["tracks"]);
+        $workflow = $firstTrack["workflow"] ?? "default";
+
+        return match ($workflow) {
+            "social_media" => "social_media",
+            default => "universal_documentation",
         };
+    }
+
+    /**
+     * Build the context array passed to the workflow executor.
+     *
+     * Combines top-level structure fields (title, slugs, directories) with
+     * first-track fields (research_text, type, lang) into a flat key-value
+     * map that workflow stage templates can reference via {{key}}.
+     *
+     * @param array<string, mixed> $structure
+     *
+     * @return array<string, mixed> Context variables for template resolution.
+     */
+    private function buildContext(array $structure): array
+    {
+        $firstTrack = reset($structure["tracks"]);
+
+        return [
+            "title" => $structure["title"],
+            "title_slug" => $structure["title_slug"],
+            "domain_dir" => $structure["domain_dir"],
+            "assets_dir" => $structure["assets_dir"],
+            "research_dir" => $structure["research_dir"],
+            "research_text" => $firstTrack["research_text"] ?? "",
+            "type" => $firstTrack["type"] ?? "",
+            "lang" => $firstTrack["lang"] ?? "en",
+        ];
     }
 }

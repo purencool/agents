@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
@@ -22,20 +21,38 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Fetch the path from your .env file
+        // AGENT_DATA_STORE
         $envPath = env("AGENT_DATA_STORE");
-
         if ($envPath) {
-            // Resolve the relative path accurately against the Laravel base path
             $resolvedPath = base_path($envPath);
-
-            // Check if the directory does NOT exist
             if (!is_dir($resolvedPath)) {
-                // Handle the missing directory (e.g., auto-create it)
                 mkdir($resolvedPath, 0755, true);
-
                 Log::info(
-                    "AGENT_DATA_STORE directory did not exist. Created at: {$resolvedPath}",
+                    "AGENT_DATA_STORE directory created at: {$resolvedPath}",
+                );
+            }
+        }
+
+        // OVERLAY_WORKFLOWS (integration team drops custom workflow JSONs here)
+        $workflowOverlay = env("OVERLAY_WORKFLOWS");
+        if ($workflowOverlay) {
+            $workflowPath = base_path($workflowOverlay);
+            if (!is_dir($workflowPath)) {
+                mkdir($workflowPath, 0755, true);
+                Log::info(
+                    "OVERLAY_WORKFLOWS directory created at: {$workflowPath}",
+                );
+            }
+        }
+
+        // OVERLAY_OVERRIDES (integration team drops custom skill JSONs here)
+        $skillOverlay = env("OVERLAY_OVERRIDES");
+        if ($skillOverlay) {
+            $skillPath = base_path($skillOverlay);
+            if (!is_dir($skillPath)) {
+                mkdir($skillPath, 0755, true);
+                Log::info(
+                    "OVERLAY_OVERRIDES directory created at: {$skillPath}",
                 );
             }
         }

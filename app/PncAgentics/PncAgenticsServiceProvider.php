@@ -72,20 +72,19 @@ class PncAgenticsServiceProvider extends ServiceProvider
 
             if (File::isDirectory($base)) {
                 foreach (File::allFiles($base) as $file) {
-                    if ($file->getExtension() === "md") {
-                        $relativePath = $file->getRelativePathname();
-                        $pathWithoutExt = Str::replaceLast(
-                            ".md",
-                            "",
-                            $relativePath,
-                        );
-                        $key = Str::lower(
-                            str_replace(["/", "\\"], ".", $pathWithoutExt),
-                        );
-                        if (Str::endsWith($key, ".skills")) {
-                            $key = Str::replaceLast(".skills", "", $key);
+                    if ($file->getExtension() === "json") {
+                        $data = json_decode($file->getContents(), true);
+
+                        if (json_last_error() !== JSON_ERROR_NONE) {
+                            continue;
                         }
-                        $skills[$key] = $file->getContents();
+
+                        $name = $data["name"] ?? null;
+                        if ($name === null) {
+                            continue;
+                        }
+
+                        $skills[$name] = $data;
                     }
                 }
             }

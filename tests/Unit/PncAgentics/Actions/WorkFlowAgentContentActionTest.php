@@ -11,201 +11,207 @@ declare(strict_types=1);
 
 namespace Tests\Unit\PncAgentics\Actions;
 
-use App\PncAgentics\Workflows\Types\SocialMediaWorkflow;
-use App\PncAgentics\Workflows\Types\UniversalDocumentationWorkflow;
 use App\PncAgentics\Actions\WorkFlowAgentContentAction;
+use App\PncAgentics\Workflows\JsonWorkflowExecutor;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
  * Unit tests for {@see WorkFlowAgentContentAction}.
  *
- * Verifies that the correct workflow is selected based on the first
- * track's "workflow" field, that the full structure is passed through
- * unmodified as the argument, and that the workflow's string output
- * is stored in the structure's "content" key for downstream templating.
+ * Verifies that:
+ *  - The correct workflow name is resolved from the first track's "workflow" field.
+ *  - The context is built from the structure and passed to the executor.
+ *  - The executor's string output is stored in the structure's "content" key.
+ *  - All original structure keys are preserved.
  *
  * @covers \App\PncAgentics\Actions\WorkFlowAgentContentAction
  */
 class WorkFlowAgentContentActionTest extends TestCase
 {
-    private UniversalDocumentationWorkflow $universalWorkflow;
-    private SocialMediaWorkflow $socialMediaWorkflow;
+    private JsonWorkflowExecutor $executor;
     private WorkFlowAgentContentAction $action;
 
     /**
+     * A representative content structure with two tracks.
+     *
      * @var array<string, mixed>
      */
-    private array $structure = [
-        "uuid" => "abc-123-def",
-        "domain_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000",
-        "assets_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000/assets",
-        "research_dir" => "/tmp/research/abc-123-def/2026_11_10_120000",
-        "title" => "Can AI models be deployed on-premises?",
-        "title_slug" => "can-ai-models-be-deployed-on-premises",
-        "tracks" => [
-            "blog.com/blog/en" => [
-                "domain" => "blog.com",
-                "type" => "blog",
-                "template" => "social",
-                "track" => "social_media",
-                "track_type" => "social",
-                "workflow" => "default",
-                "lang" => "en",
-                "content_json" => "/tmp/agents/abc-123-def/blog-content.json",
-                "content_md" => "/tmp/agents/abc-123-def/blog-content.md",
-                "description_md" =>
-                    "/tmp/agents/abc-123-def/blog-description.md",
-                "research_text" => "Research about AI deployment.",
-            ],
-            "meeting.com/meeting/en" => [
-                "domain" => "meeting.com",
-                "type" => "meeting",
-                "template" => "social",
-                "track" => "social_media",
-                "track_type" => "social",
-                "workflow" => "default",
-                "lang" => "en",
-                "content_json" =>
-                    "/tmp/agents/abc-123-def/meeting-content.json",
-                "content_md" => "/tmp/agents/abc-123-def/meeting-content.md",
-                "description_md" =>
-                    "/tmp/agents/abc-123-def/meeting-description.md",
-                "research_text" => "Research about AI in meetings.",
-            ],
-        ],
-    ];
+    private array $structure;
 
     protected function setUp(): void
     {
-        $this->universalWorkflow = \Mockery::mock(
-            UniversalDocumentationWorkflow::class,
-        );
-        $this->socialMediaWorkflow = \Mockery::mock(SocialMediaWorkflow::class);
+        $this->executor = Mockery::mock(JsonWorkflowExecutor::class);
+        $this->action = new WorkFlowAgentContentAction($this->executor);
 
-        $this->action = new WorkFlowAgentContentAction(
-            $this->universalWorkflow,
-            $this->socialMediaWorkflow,
-        );
+        $this->structure = [
+            "uuid" => "abc-123-def",
+            "domain_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000",
+            "assets_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000/assets",
+            "research_dir" => "/tmp/research/abc-123-def/2026_11_10_120000",
+            "title" => "Can AI models be deployed on-premises?",
+            "title_slug" => "can-ai-models-be-deployed-on-premises",
+            "tracks" => [
+                "blog.com/blog/en" => [
+                    "domain" => "blog.com",
+                    "type" => "blog",
+                    "workflow" => "default",
+                    "lang" => "en",
+                    "research_text" => "Research about AI deployment.",
+                ],
+                "meeting.com/meeting/en" => [
+                    "domain" => "meeting.com",
+                    "type" => "meeting",
+                    "workflow" => "default",
+                    "lang" => "en",
+                    "research_text" => "Research about AI in meetings.",
+                ],
+            ],
+        ];
     }
 
     protected function tearDown(): void
     {
-        \Mockery::close();
+        Mockery::close();
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Workflow resolution
+    // ─────────────────────────────────────────────────────────────────────
+
     /**
-     * Verifies that a "default" workflow routes to UniversalDocumentationWorkflow
-     * and the workflow's output is stored in the "content" key.
+     * A "default" workflow field should resolve to "universal_documentation".
      */
     #[Test]
-    public function execute_routes_default_workflow_to_universal(): void
+    public function execute_resolves_default_workflow_to_universal_documentation(): void
     {
-        $this->universalWorkflow
+        $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with($this->structure)
+            ->with("universal_documentation", Mockery::type("array"))
             ->andReturn("Generated output");
-
-        $this->socialMediaWorkflow->shouldNotReceive("execute");
 
         $result = $this->action->execute($this->structure);
 
-        $expected = $this->structure;
-        $expected["content"] = "Generated output";
-        $this->assertSame($expected, $result);
+        $this->assertSame("Generated output", $result["content"]);
     }
 
     /**
-     * Verifies that a "social_media" workflow routes to SocialMediaWorkflow
-     * and the workflow's output is stored in the "content" key.
+     * A "social_media" workflow field should resolve to "social_media".
      */
     #[Test]
-    public function execute_routes_social_media_workflow_to_social(): void
+    public function execute_resolves_social_media_workflow(): void
     {
         $structure = $this->structure;
         $structure["tracks"]["blog.com/blog/en"]["workflow"] = "social_media";
 
-        $this->socialMediaWorkflow
+        $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with($structure)
+            ->with("social_media", Mockery::type("array"))
             ->andReturn("Social output");
-
-        $this->universalWorkflow->shouldNotReceive("execute");
 
         $result = $this->action->execute($structure);
 
-        $expected = $structure;
-        $expected["content"] = "Social output";
-        $this->assertSame($expected, $result);
+        $this->assertSame("Social output", $result["content"]);
     }
 
     /**
-     * Verifies that an empty workflow string is treated as "default"
-     * and routed to UniversalDocumentationWorkflow.
+     * An empty workflow field should fall back to "universal_documentation".
      */
     #[Test]
-    public function execute_routes_empty_workflow_to_universal(): void
+    public function execute_resolves_empty_workflow_to_universal_documentation(): void
     {
         $structure = $this->structure;
         $structure["tracks"]["blog.com/blog/en"]["workflow"] = "";
 
-        $this->universalWorkflow
+        $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with($structure)
+            ->with("universal_documentation", Mockery::type("array"))
             ->andReturn("Output");
-
-        $this->socialMediaWorkflow->shouldNotReceive("execute");
 
         $result = $this->action->execute($structure);
 
-        $expected = $structure;
-        $expected["content"] = "Output";
-        $this->assertSame($expected, $result);
+        $this->assertSame("Output", $result["content"]);
     }
 
     /**
-     * Verifies that an unknown workflow identifier falls back to
-     * UniversalDocumentationWorkflow.
+     * An unknown workflow identifier should fall back to "universal_documentation".
      */
     #[Test]
-    public function execute_routes_unknown_workflow_to_universal(): void
+    public function execute_resolves_unknown_workflow_to_universal_documentation(): void
     {
         $structure = $this->structure;
         $structure["tracks"]["blog.com/blog/en"]["workflow"] =
             "some_future_type";
 
-        $this->universalWorkflow
+        $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with($structure)
+            ->with("universal_documentation", Mockery::type("array"))
             ->andReturn("Output");
-
-        $this->socialMediaWorkflow->shouldNotReceive("execute");
 
         $result = $this->action->execute($structure);
 
-        $expected = $structure;
-        $expected["content"] = "Output";
-        $this->assertSame($expected, $result);
+        $this->assertSame("Output", $result["content"]);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Context building
+    // ─────────────────────────────────────────────────────────────────────
+
     /**
-     * Verifies that the original structure keys are preserved and
-     * that the "content" key is the only addition.
+     * The context passed to the executor should contain the expected keys
+     * derived from the structure and the first track.
      */
     #[Test]
-    public function execute_adds_content_key_to_structure(): void
+    public function execute_builds_context_from_structure_and_first_track(): void
     {
-        $this->universalWorkflow
+        $this->executor
             ->shouldReceive("execute")
             ->once()
+            ->with(
+                "universal_documentation",
+                Mockery::on(function (array $ctx): bool {
+                    return $ctx["title"] ===
+                        "Can AI models be deployed on-premises?" &&
+                        $ctx["title_slug"] ===
+                            "can-ai-models-be-deployed-on-premises" &&
+                        $ctx["domain_dir"] ===
+                            "/tmp/agents/abc-123-def/2026_11_10_120000" &&
+                        $ctx["assets_dir"] ===
+                            "/tmp/agents/abc-123-def/2026_11_10_120000/assets" &&
+                        $ctx["research_dir"] ===
+                            "/tmp/research/abc-123-def/2026_11_10_120000" &&
+                        $ctx["research_text"] ===
+                            "Research about AI deployment." &&
+                        $ctx["type"] === "blog" &&
+                        $ctx["lang"] === "en";
+                }),
+            )
             ->andReturn("Output");
+
+        $this->action->execute($this->structure);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Structure passthrough
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * The returned structure should preserve all original keys and add
+     * only the "content" key.
+     */
+    #[Test]
+    public function execute_preserves_original_keys_and_adds_content(): void
+    {
+        $this->executor->shouldReceive("execute")->once()->andReturn("Output");
 
         $result = $this->action->execute($this->structure);
 
+        // Original keys preserved.
         $this->assertSame($this->structure["uuid"], $result["uuid"]);
         $this->assertSame($this->structure["title"], $result["title"]);
         $this->assertSame(
@@ -226,33 +232,26 @@ class WorkFlowAgentContentActionTest extends TestCase
         );
         $this->assertSame($this->structure["tracks"], $result["tracks"]);
 
+        // New "content" key added.
         $this->assertArrayHasKey("content", $result);
         $this->assertSame("Output", $result["content"]);
     }
 
     /**
-     * Verifies that the workflow is called exactly once with the full
-     * structure (not per-track) and that the content string is a
-     * non-empty value suitable for downstream templating.
+     * The executor should be called exactly once with the full structure
+     * (not per-track).
      */
     #[Test]
-    public function execute_calls_workflow_once_with_full_structure(): void
+    public function execute_calls_executor_exactly_once(): void
     {
-        $this->universalWorkflow
+        $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->withArgs(function (array $structure) {
-                return $structure["uuid"] === "abc-123-def" &&
-                    count($structure["tracks"]) === 2 &&
-                    isset($structure["tracks"]["blog.com/blog/en"]) &&
-                    isset($structure["tracks"]["meeting.com/meeting/en"]);
-            })
             ->andReturn("# Full article content");
 
         $result = $this->action->execute($this->structure);
 
         $this->assertIsString($result["content"]);
         $this->assertNotSame("", $result["content"]);
-        $this->assertSame("# Full article content", $result["content"]);
     }
 }

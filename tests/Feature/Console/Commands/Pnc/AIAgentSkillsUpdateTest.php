@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Console\Commands\Pnc;
 
 use App\PncAgentics\Contracts\SkillRegistryInterface;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -99,9 +100,7 @@ class AIAgentSkillsUpdateTest extends TestCase
     #[Test]
     public function handle_createsNewSkillWhenKeyDoesNotExist(): void
     {
-        $this->mockRegistry(
-            getReturns: null, // key not found → create path
-        );
+        $this->mockRegistry(getReturns: null);
 
         $this->artisan("pnc:agent:skills:update", [
             "--input" => json_encode([
@@ -123,7 +122,16 @@ class AIAgentSkillsUpdateTest extends TestCase
     public function handle_updatesExistingSkillWhenKeyExists(): void
     {
         $this->mockRegistry(
-            getReturns: "Existing content", // key found → update path
+            getReturns: [
+                "name" => "existing.skill.key",
+                "system_instructions" => "Existing content",
+                "model" => "",
+                "temperature" => "",
+                "top_p" => "",
+                "tool_definitions" => "",
+                "response_schema" => "",
+                "token_limits" => "",
+            ],
         );
 
         $this->artisan("pnc:agent:skills:update", [
@@ -146,13 +154,17 @@ class AIAgentSkillsUpdateTest extends TestCase
     #[Test]
     public function handle_failsWhenRegistryThrowsInvalidArgument(): void
     {
-        $mock = $this->mock(SkillRegistryInterface::class);
-        $mock->method("get")->willReturn(null);
+        $mock = Mockery::mock(SkillRegistryInterface::class);
+        $mock->shouldReceive("get")->andReturn(null);
         $mock
-            ->method("create")
-            ->willThrowException(
+            ->shouldReceive("create")
+            ->andThrow(
                 new \InvalidArgumentException("Skill 'x.y' already exists."),
             );
+        $mock->shouldReceive("all")->andReturn([]);
+        $mock->shouldReceive("update")->andReturn(null);
+        $mock->shouldReceive("delete")->andReturn(null);
+
         $this->app->instance(SkillRegistryInterface::class, $mock);
 
         $this->artisan("pnc:agent:skills:update", [
@@ -172,11 +184,15 @@ class AIAgentSkillsUpdateTest extends TestCase
     #[Test]
     public function handle_failsWhenRegistryThrowsRuntimeException(): void
     {
-        $mock = $this->mock(SkillRegistryInterface::class);
-        $mock->method("get")->willReturn(null);
+        $mock = Mockery::mock(SkillRegistryInterface::class);
+        $mock->shouldReceive("get")->andReturn(null);
         $mock
-            ->method("create")
-            ->willThrowException(new \RuntimeException("Permission denied"));
+            ->shouldReceive("create")
+            ->andThrow(new \RuntimeException("Permission denied"));
+        $mock->shouldReceive("all")->andReturn([]);
+        $mock->shouldReceive("update")->andReturn(null);
+        $mock->shouldReceive("delete")->andReturn(null);
+
         $this->app->instance(SkillRegistryInterface::class, $mock);
 
         $this->artisan("pnc:agent:skills:update", [
@@ -215,21 +231,21 @@ class AIAgentSkillsUpdateTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Bind a mock SkillRegistryInterface into the application container.
+     * Bind a Mockery mock of SkillRegistryInterface into the application container.
      *
-     * @param string|null $getReturns The value returned by get().
-     *                                Null simulates "key not found".
+     * @param array|null $getReturns The value returned by get().
+     *                               Null simulates "key not found".
      */
     private function mockRegistry(
-        ?string $getReturns = null,
-    ): \PHPUnit\Framework\MockObject\MockObject {
-        $mock = $this->mock(SkillRegistryInterface::class);
+        ?array $getReturns = null,
+    ): Mockery\MockInterface {
+        $mock = Mockery::mock(SkillRegistryInterface::class);
 
-        $mock->method("all")->willReturn([]);
-        $mock->method("get")->willReturn($getReturns);
-        $mock->method("create")->willReturn(null);
-        $mock->method("update")->willReturn(null);
-        $mock->method("delete")->willReturn(null);
+        $mock->shouldReceive("all")->andReturn([]);
+        $mock->shouldReceive("get")->andReturn($getReturns);
+        $mock->shouldReceive("create")->andReturn(null);
+        $mock->shouldReceive("update")->andReturn(null);
+        $mock->shouldReceive("delete")->andReturn(null);
 
         $this->app->instance(SkillRegistryInterface::class, $mock);
 

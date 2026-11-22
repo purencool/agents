@@ -49,9 +49,9 @@ interface SkillRegistryInterface
      * @param string $key Dot-notation skill key
      *                    (e.g. "track.core_writing.body_content.topic_sentence_opener").
      *
-     * @return string|null The skill's markdown content, or null if the key does not exist.
+     * @return array|null The skill's markdown content, or null if the key does not exist.
      */
-    public function get(string $key): ?string;
+    public function get(string $key): ?array;
 
     /**
      * Create a new skill file on disk and register it in the in-memory config.

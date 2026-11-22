@@ -27,6 +27,9 @@
 !phpunit.xml.dist
 !phpcs.xml
 !.phpstorm.meta.php
+!docker-composer.yml
+!Dockerfile
+!.dockerignore
 # =====================================================================
 # Strict Overrides for Folders Whitelisted Above
 # =====================================================================

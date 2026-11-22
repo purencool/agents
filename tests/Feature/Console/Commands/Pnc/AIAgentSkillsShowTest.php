@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Console\Commands\Pnc;
 
 use App\PncAgentics\Contracts\SkillRegistryInterface;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -46,12 +47,8 @@ class AIAgentSkillsShowTest extends TestCase
     }
 
     /**
-     * When the registry returns null (simulating a misconfigured provider),
-     * the command should also fail gracefully.
-     *
-     * Note: SkillRegistryInterface::all() is typed to return array, so in
-     * practice this state is caught by the type system. This test documents
-     * the intent that the command handles the empty case.
+     * When the registry returns an empty array (simulating a misconfigured
+     * provider), the command should also fail gracefully.
      */
     #[Test]
     public function handle_failsWhenSkillsConfigIsNull(): void
@@ -71,7 +68,9 @@ class AIAgentSkillsShowTest extends TestCase
     public function handle_failsWhenSkillNotFound(): void
     {
         $this->mockRegistry(
-            skills: ["known.skill" => "Known content"],
+            skills: [
+                "known.skill" => ["system_instructions" => "Known content"],
+            ],
             getReturns: null,
         );
 
@@ -90,10 +89,13 @@ class AIAgentSkillsShowTest extends TestCase
     {
         $this->mockRegistry(
             skills: [
-                "developer_docs.core_writing.hook_writer" =>
-                    "You are a skilled hook writer.",
+                "developer_docs.core_writing.hook_writer" => [
+                    "system_instructions" => "You are a skilled hook writer.",
+                ],
             ],
-            getReturns: "You are a skilled hook writer.",
+            getReturns: [
+                "system_instructions" => "You are a skilled hook writer.",
+            ],
         );
 
         $this->artisan("pnc:agent:skills:show", [
@@ -104,13 +106,16 @@ class AIAgentSkillsShowTest extends TestCase
     }
 
     /**
-     * A skill key that exists but maps to an empty string should still
-     * succeed (get() returns "", not null).
+     * A skill key that exists but has empty system_instructions should
+     * still succeed (get() returns an array, not null).
      */
     #[Test]
     public function handle_succeedsForEmptySkillContent(): void
     {
-        $this->mockRegistry(skills: ["empty.skill" => ""], getReturns: "");
+        $this->mockRegistry(
+            skills: ["empty.skill" => ["system_instructions" => ""]],
+            getReturns: ["system_instructions" => ""],
+        );
 
         $this->artisan("pnc:agent:skills:show", [
             "skill" => "empty.skill",
@@ -125,8 +130,12 @@ class AIAgentSkillsShowTest extends TestCase
     public function handle_resolvesKeysWithSpecialCharacters(): void
     {
         $this->mockRegistry(
-            skills: ["track-2.core_writing.v3.writer" => "Special key content"],
-            getReturns: "Special key content",
+            skills: [
+                "track-2.core_writing.v3.writer" => [
+                    "system_instructions" => "Special key content",
+                ],
+            ],
+            getReturns: ["system_instructions" => "Special key content"],
         );
 
         $this->artisan("pnc:agent:skills:show", [
@@ -145,10 +154,14 @@ class AIAgentSkillsShowTest extends TestCase
     {
         $this->mockRegistry(
             skills: [
-                "blog_posts.style_guide" => "Full content here",
-                "blog_posts.style" => "Different skill",
+                "blog_posts.style_guide" => [
+                    "system_instructions" => "Full content here",
+                ],
+                "blog_posts.style" => [
+                    "system_instructions" => "Different skill",
+                ],
             ],
-            getReturns: "Different skill",
+            getReturns: ["system_instructions" => "Different skill"],
         );
 
         $this->artisan("pnc:agent:skills:show", ["skill" => "blog_posts.style"])
@@ -165,8 +178,12 @@ class AIAgentSkillsShowTest extends TestCase
     {
         $this->mockRegistry(
             skills: [
-                "track.core_writing.hook_writer" => "Hook content",
-                "track.core_writing.body_writer" => "Body content",
+                "track.core_writing.hook_writer" => [
+                    "system_instructions" => "Hook content",
+                ],
+                "track.core_writing.body_writer" => [
+                    "system_instructions" => "Body content",
+                ],
             ],
         );
 
@@ -196,21 +213,26 @@ class AIAgentSkillsShowTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Bind a mock SkillRegistryInterface into the application container.
+     * Bind a Mockery mock of SkillRegistryInterface into the application container.
      *
-     * @param array<string, string> $skills     The array returned by all().
-     * @param string|null           $getReturns The value returned by get().
-     *                                          Defaults to null (not found).
+     * @param array<string, array> $skills     The array returned by all().
+     * @param array|null           $getReturns The value returned by get().
+     *                                          Null simulates "key not found".
      */
     private function mockRegistry(
         array $skills = [],
-        ?string $getReturns = null,
-    ): void {
-        $mock = $this->mock(SkillRegistryInterface::class);
+        ?array $getReturns = null,
+    ): Mockery\MockInterface {
+        $mock = Mockery::mock(SkillRegistryInterface::class);
 
-        $mock->method("all")->willReturn($skills);
-        $mock->method("get")->willReturn($getReturns);
+        $mock->shouldReceive("all")->andReturn($skills);
+        $mock->shouldReceive("get")->andReturn($getReturns);
+        $mock->shouldReceive("create")->andReturn(null);
+        $mock->shouldReceive("update")->andReturn(null);
+        $mock->shouldReceive("delete")->andReturn(null);
 
         $this->app->instance(SkillRegistryInterface::class, $mock);
+
+        return $mock;
     }
 }

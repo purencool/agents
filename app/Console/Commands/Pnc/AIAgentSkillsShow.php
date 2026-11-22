@@ -64,7 +64,9 @@ class AIAgentSkillsShow extends Command
         $skills = $this->registry->all();
 
         if (empty($skills)) {
-            $this->error("No skills found. Ensure PncAgenticsServiceProvider is registered.");
+            $this->error(
+                "No skills found. Ensure PncAgenticsServiceProvider is registered.",
+            );
             return self::FAILURE;
         }
 
@@ -80,7 +82,9 @@ class AIAgentSkillsShow extends Command
 
         if ($content === null) {
             $this->error("Skill '{$skillKey}' not found.");
-            $this->info("Tip: Run 'php artisan pnc:agent:skills:show' (no argument) to list all skills.");
+            $this->info(
+                "Tip: Run 'php artisan pnc:agent:skills:show' (no argument) to list all skills.",
+            );
             return self::FAILURE;
         }
 
@@ -98,12 +102,16 @@ class AIAgentSkillsShow extends Command
      */
     protected function listAll(array $skills): int
     {
-        $this->info("Available skills ({$count = count($skills)}):");
+        $count = count($skills);
+        $this->info("Available skills ({$count}):");
         $this->newLine();
 
         $rows = [];
         foreach ($skills as $key => $content) {
-            $rows[] = [$key, strlen($content) . " chars"];
+            $rows[] = [
+                $key,
+                strlen($content["system_instructions"] ?? "") . " chars",
+            ];
         }
 
         $this->table(["Key", "Size"], $rows);

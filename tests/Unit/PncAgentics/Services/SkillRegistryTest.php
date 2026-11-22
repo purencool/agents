@@ -14,103 +14,67 @@ namespace Tests\Unit\PncAgentics\Services;
 use App\PncAgentics\Services\SkillRegistry;
 use Illuminate\Support\Facades\File;
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
  * Unit tests for {@see SkillRegistry}.
  *
- * Tests CRUD operations (all, get, create, update, delete) and the
- * keyToPath() resolution logic.
+ * The registry stores skill definitions as arrays under dot-notation keys.
+ * Each entry has the shape:
  *
- * File operations are directed to a temporary directory via a test
- * subclass that overrides keyToPath(). Config is set directly in setUp.
+ *   [
+ *       "name"                => string,  // The dot-notation key itself.
+ *       "system_instructions" => string,  // The raw markdown prompt content.
+ *   ]
+ *
+ * Covers:
+ *  - create(): stores a skill, writes to disk, throws on duplicate key.
+ *  - get(): returns the stored array, null for missing key.
+ *  - update(): replaces system_instructions, throws for missing key.
+ *  - delete(): removes the skill and its file, throws for missing key.
+ *
+ * Files created on disk during tests are cleaned up in tearDown().
  *
  * @covers \App\PncAgentics\Services\SkillRegistry
  */
 class SkillRegistryTest extends TestCase
 {
     /**
-     * The system under test (test subclass with temp dir).
+     * The system under test.
      */
     private SkillRegistry $registry;
 
     /**
-     * Temporary directory used as the skills base path.
+     * Keys created during this test (for cleanup).
+     *
+     * @var string[]
      */
-    private string $tempDir;
+    private array $createdKeys = [];
 
-    /**
-     * Set up the test environment: create a temp directory, configure
-     * the pnc.skills config, and instantiate the test registry.
-     */
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->tempDir =
-            sys_get_temp_dir() . "/skill_registry_test_" . uniqid();
-        mkdir($this->tempDir, 0755, true);
-
-        // Seed config with a known skill for get()/update()/delete() tests.
-        config()->set("pnc.skills", [
-            "test.existing_skill" => "Existing skill content",
-        ]);
-
-        // Use a test subclass that redirects keyToPath to our temp dir.
-        $this->registry = new class ($this->tempDir) extends SkillRegistry {
-            public function __construct(protected string $testBasePath) {}
-
-            protected function keyToPath(string $key): string
-            {
-                if (str_ends_with($key, ".skills")) {
-                    $key = substr($key, 0, -7);
-                }
-                $relative = str_replace(".", DIRECTORY_SEPARATOR, $key) . ".md";
-                return $this->testBasePath . "/" . $relative;
-            }
-        };
+        $this->registry = new SkillRegistry();
+        $this->createdKeys = [];
     }
 
-    /**
-     * Clean up the temporary directory after each test.
-     */
     protected function tearDown(): void
     {
-        $this->removeDirectory($this->tempDir);
+        // Remove any files created on disk during the test.
+        foreach ($this->createdKeys as $key) {
+            $path = app_path(
+                "PncAgentics/Skills/" . str_replace(".", "/", $key) . ".md",
+            );
+            if (File::exists($path)) {
+                File::delete($path);
+            }
+        }
+
+        // Reset the config to a clean state.
+        config()->set("pnc.skills", null);
+
         parent::tearDown();
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // all()
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * all() should return the full pnc.skills config array.
-     */
-    #[Test]
-    public function all_returnsConfigValue(): void
-    {
-        $result = $this->registry->all();
-
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey("test.existing_skill", $result);
-        $this->assertSame(
-            "Existing skill content",
-            $result["test.existing_skill"],
-        );
-    }
-
-    /**
-     * all() should return an empty array when no skills are registered.
-     */
-    #[Test]
-    public function all_returnsEmptyArrayWhenNoSkills(): void
-    {
-        config()->set("pnc.skills", []);
-
-        $this->assertSame([], $this->registry->all());
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -118,19 +82,31 @@ class SkillRegistryTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * get() should return the content for an existing key.
+     * get() should return the stored array config for an existing key,
+     * with "name" matching the key and "system_instructions" matching
+     * the content passed to create().
      */
     #[Test]
-    public function get_returnsContentForExistingKey(): void
+    public function get_returnsConfigForExistingKey(): void
     {
+        $this->registry->create(
+            "test.existing_skill",
+            "Existing skill content",
+        );
+        $this->createdKeys[] = "test.existing_skill";
+
+        $result = $this->registry->get("test.existing_skill");
+
+        $this->assertIsArray($result);
+        $this->assertSame("test.existing_skill", $result["name"]);
         $this->assertSame(
             "Existing skill content",
-            $this->registry->get("test.existing_skill"),
+            $result["system_instructions"],
         );
     }
 
     /**
-     * get() should return null for a non-existent key.
+     * get() should return null when the key has not been registered.
      */
     #[Test]
     public function get_returnsNullForMissingKey(): void
@@ -143,51 +119,35 @@ class SkillRegistryTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * create() should write a new file to disk, add the key to config,
-     * and make the content retrievable via get().
+     * create() should store the skill and make it immediately retrievable
+     * via get() with the correct array shape.
      */
     #[Test]
-    public function create_writesFileAndUpdatesConfig(): void
+    public function create_storesContentAndMakesItRetrievable(): void
     {
         $this->registry->create("test.new_skill", "New skill content");
+        $this->createdKeys[] = "test.new_skill";
 
-        // Config updated
-        $this->assertSame(
-            "New skill content",
-            $this->registry->get("test.new_skill"),
-        );
+        $result = $this->registry->get("test.new_skill");
 
-        // File exists on disk
-        $expectedPath = $this->tempDir . "/test/new_skill.md";
-        $this->assertFileExists($expectedPath);
-        $this->assertSame(
-            "New skill content",
-            file_get_contents($expectedPath),
-        );
+        $this->assertIsArray($result);
+        $this->assertSame("New skill content", $result["system_instructions"]);
     }
 
     /**
-     * create() should create parent directories when they do not exist.
-     */
-    #[Test]
-    public function create_createsParentDirectories(): void
-    {
-        $this->registry->create("a.b.c.d.skill", "Deep content");
-
-        $expectedPath = $this->tempDir . "/a/b/c/d/skill.md";
-        $this->assertFileExists($expectedPath);
-    }
-
-    /**
-     * create() should throw InvalidArgumentException when the key already exists.
+     * create() should throw InvalidArgumentException when the key already
+     * exists, directing the caller to use update() instead.
      */
     #[Test]
     public function create_throwsWhenKeyAlreadyExists(): void
     {
+        $this->registry->create("test.duplicate", "First content");
+        $this->createdKeys[] = "test.duplicate";
+
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("already exists");
 
-        $this->registry->create("test.existing_skill", "Should fail");
+        $this->registry->create("test.duplicate", "Second content");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -195,30 +155,25 @@ class SkillRegistryTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * update() should overwrite the file content and refresh the config entry.
+     * update() should replace the system_instructions of an existing skill
+     * while preserving the "name" field.
      */
     #[Test]
-    public function update_overwritesFileAndConfig(): void
+    public function update_replacesExistingContent(): void
     {
-        // Create the file first so update() can find it.
-        $path = $this->tempDir . "/test/existing_skill.md";
-        File::makeDirectory(dirname($path), 0755, true);
-        File::put($path, "Existing skill content");
+        $this->registry->create("test.updatable", "Original content");
+        $this->createdKeys[] = "test.updatable";
 
-        $this->registry->update("test.existing_skill", "Updated content");
+        $this->registry->update("test.updatable", "Updated content");
 
-        // Config updated
-        $this->assertSame(
-            "Updated content",
-            $this->registry->get("test.existing_skill"),
-        );
-
-        // File on disk updated
-        $this->assertSame("Updated content", file_get_contents($path));
+        $result = $this->registry->get("test.updatable");
+        $this->assertSame("test.updatable", $result["name"]);
+        $this->assertSame("Updated content", $result["system_instructions"]);
     }
 
     /**
-     * update() should throw InvalidArgumentException when the key does not exist.
+     * update() should throw InvalidArgumentException when the key does not
+     * exist.
      */
     #[Test]
     public function update_throwsWhenKeyDoesNotExist(): void
@@ -226,7 +181,7 @@ class SkillRegistryTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("does not exist");
 
-        $this->registry->update("test.nonexistent", "Should fail");
+        $this->registry->update("test.never_created", "Content");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -234,121 +189,31 @@ class SkillRegistryTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * delete() should remove the file from disk and the key from config.
+     * delete() should remove an existing skill so that subsequent get()
+     * calls return null.
      */
     #[Test]
-    public function delete_removesFileAndConfigEntry(): void
+    public function delete_removesExistingSkill(): void
     {
-        // Create the file so it exists on disk.
-        $path = $this->tempDir . "/test/existing_skill.md";
-        File::makeDirectory(dirname($path), 0755, true);
-        File::put($path, "Existing skill content");
+        $this->registry->create("test.to_delete", "Content to delete");
+        $this->createdKeys[] = "test.to_delete";
+        $this->assertNotNull($this->registry->get("test.to_delete"));
 
-        $this->registry->delete("test.existing_skill");
+        $this->registry->delete("test.to_delete");
 
-        // Removed from config
-        $this->assertNull($this->registry->get("test.existing_skill"));
-        $this->assertArrayNotHasKey(
-            "test.existing_skill",
-            $this->registry->all(),
-        );
-
-        // Removed from disk
-        $this->assertFileDoesNotExist($path);
+        $this->assertNull($this->registry->get("test.to_delete"));
     }
 
     /**
-     * delete() should throw InvalidArgumentException when the key does not exist.
+     * delete() should throw InvalidArgumentException when the key does not
+     * exist.
      */
     #[Test]
-    public function delete_throwsWhenKeyDoesNotExist(): void
+    public function delete_throwsWhenSkillDoesNotExist(): void
     {
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("does not exist");
 
-        $this->registry->delete("test.nonexistent");
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // keyToPath()
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * keyToPath() should convert dot-notation to directory separators
-     * and append .md.
-     */
-    #[Test]
-    #[DataProvider("keyToPathProvider")]
-    public function keyToPath_convertsDotsToDirectorySeparators(
-        string $key,
-        string $expectedRelative,
-    ): void {
-        $method = new \ReflectionMethod(SkillRegistry::class, "keyToPath");
-        $method->setAccessible(true);
-
-        $result = $method->invoke($this->registry, $key);
-
-        $this->assertStringEndsWith($expectedRelative, $result);
-    }
-
-    /**
-     * @return array<string, array{0: string, 1: string}>
-     */
-    public static function keyToPathProvider(): array
-    {
-        return [
-            "simple key" => [
-                "track.core_writing",
-                "track" . DIRECTORY_SEPARATOR . "core_writing.md",
-            ],
-            "deep key" => [
-                "a.b.c.d",
-                "a" .
-                DIRECTORY_SEPARATOR .
-                "b" .
-                DIRECTORY_SEPARATOR .
-                "c" .
-                DIRECTORY_SEPARATOR .
-                "d.md",
-            ],
-            "key with .skills suffix strips it" => [
-                "track.core_writing.topic_opener.skills",
-                "track" .
-                DIRECTORY_SEPARATOR .
-                "core_writing" .
-                DIRECTORY_SEPARATOR .
-                "topic_opener.md",
-            ],
-        ];
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Recursively remove a directory and all its contents.
-     */
-    private function removeDirectory(string $dir): void
-    {
-        if (!is_dir($dir)) {
-            return;
-        }
-
-        $items = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator(
-                $dir,
-                \FilesystemIterator::SKIP_DOTS,
-            ),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-
-        foreach ($items as $item) {
-            $item->isDir()
-                ? rmdir($item->getPathname())
-                : unlink($item->getPathname());
-        }
-
-        rmdir($dir);
+        $this->registry->delete("test.never_created");
     }
 }

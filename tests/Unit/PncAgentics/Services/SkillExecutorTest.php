@@ -11,9 +11,8 @@ declare(strict_types=1);
 
 namespace Tests\Unit\PncAgentics\Services;
 
-use App\PncAgentics\Services\SkillExecutor;
 use App\PncAgentics\Contracts\AgentServiceInterface;
-use Illuminate\Support\Facades\Log;
+use App\PncAgentics\Services\SkillExecutor;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -22,59 +21,44 @@ use Tests\TestCase;
 /**
  * Unit tests for {@see SkillExecutor}.
  *
- * Tests the skill resolution, template compilation, prompt payload
- * construction, and delegation to the agent service.
+ * Covers:
+ *  - processLLMCall(): template compilation, prompt payload construction,
+ *    delegation to the agent service with correct metadata.
+ *  - executeGroupedBlock(): aggregation of sub-agent skill files into a
+ *    combined system prompt, aggregated metadata flag.
+ *  - resolveFilePath(): dot-to-directory conversion, .skills suffix handling,
+ *    not-found exception.
+ *  - loadFileContent(): static caching behaviour.
+ *  - parsePlaceholders(): scalar replacement, non-scalar passthrough,
+ *    unmatched placeholder preservation.
+ *  - buildPromptPayload(): three-section structure, array/object rendering.
  *
- * The agent service mock expects the new single-array contract:
- *   AgentServiceInterface::complete(array $request): string
- *
- * where $request contains "system_prompt", "user_prompt", "temperature",
- * "max_tokens", and "metadata" keys.
+ * The AgentServiceInterface is mocked. Fixture skill files are created in a
+ * temporary directory and cleaned up in tearDown.
  *
  * @covers \App\PncAgentics\Services\SkillExecutor
  */
 class SkillExecutorTest extends TestCase
 {
-    /**
-     * Mock agent service injected into the executor under test.
-     */
     private AgentServiceInterface $aiService;
-
-    /**
-     * The system under test.
-     */
     private SkillExecutor $executor;
-
-    /**
-     * Temporary directory used to create fixture skill files.
-     */
     private string $tempDir;
 
-    /**
-     * Set up the test environment: mock the agent service, reset the static
-     * prompt cache, create a temp directory for fixture files, and
-     * instantiate the executor.
-     */
     protected function setUp(): void
     {
         parent::setUp();
 
-        // Reset the static prompt cache between tests.
         $ref = new \ReflectionProperty(SkillExecutor::class, "loadedPrompts");
         $ref->setValue(null, []);
 
         $this->aiService = $this->createMock(AgentServiceInterface::class);
         $this->executor = new SkillExecutor($this->aiService);
 
-        // Create a temporary directory for fixture skill files.
         $this->tempDir =
             sys_get_temp_dir() . "/skill_executor_test_" . uniqid();
         mkdir($this->tempDir, 0755, true);
     }
 
-    /**
-     * Clean up temporary fixture files after each test.
-     */
     protected function tearDown(): void
     {
         $this->removeDirectory($this->tempDir);
@@ -82,57 +66,141 @@ class SkillExecutorTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // execute() – normal (single-skill) path
+    // processLLMCall()
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * When given a standard skill key, execute() should resolve the file,
-     * load its contents, compile placeholders, build the prompt payload,
-     * and delegate to the agent service with the correct structured request.
+     * processLLMCall() should compile placeholders in system_instructions,
+     * build the three-section prompt payload, and delegate to the agent
+     * service with the correct structured request.
      */
     #[Test]
-    public function execute_resolvesFileAndCallsAiService(): void
+    public function processLLMCall_compilesTemplateAndCallsAiService(): void
     {
-        // Arrange: create a fixture skill file.
-        $skillPath = $this->tempDir . "/test_skill.md";
-        file_put_contents(
-            $skillPath,
-            "You are a helpful assistant. Greet {{ name }}.",
-        );
+        $this->aiService
+            ->expects($this->once())
+            ->method("complete")
+            ->with(
+                $this->callback(function (array $request): bool {
+                    return str_contains(
+                        $request["system_prompt"],
+                        "Greet Alice",
+                    ) &&
+                        str_contains($request["user_prompt"], "Greet Alice") &&
+                        $request["temperature"] === 0.7 &&
+                        $request["max_tokens"] === 512;
+                }),
+            )
+            ->willReturn("Hello, World!");
 
-        $this->aiService->method("complete")->willReturn("Hello, World!");
-
-        // Use reflection to call processLLMCall directly with known inputs
-        // to avoid depending on Laravel path helpers in a unit test.
         $method = new \ReflectionMethod(SkillExecutor::class, "processLLMCall");
         $method->setAccessible(true);
 
         $result = $method->invoke(
             $this->executor,
             "track.core_writing.test_skill",
-            "You are a helpful assistant. Greet {{ name }}.",
-            $skillPath,
-            ["name" => "World"],
+            [
+                "name" => "Test Skill",
+                "system_instructions" =>
+                    "You are a helpful assistant. Greet {{ name }}.",
+            ],
+            "/path/to/test_skill.md",
+            ["name" => "Alice"],
             ["temperature" => 0.7, "max_tokens" => 512],
             false,
         );
 
-        // Assert
         $this->assertSame("Hello, World!", $result);
     }
 
+    /**
+     * processLLMCall() should pass correct metadata (skill key, source file,
+     * aggregated flag, model) within the structured request.
+     */
+    #[Test]
+    public function processLLMCall_passesCorrectMetadata(): void
+    {
+        $this->aiService
+            ->expects($this->once())
+            ->method("complete")
+            ->with(
+                $this->callback(function (array $request): bool {
+                    return $request["metadata"]["skill_executed"] ===
+                        "my.skill.key" &&
+                        $request["metadata"]["resolved_file"] ===
+                            "/path/to/file.md" &&
+                        $request["metadata"]["is_aggregated"] === false &&
+                        $request["metadata"]["skill_model"] === null;
+                }),
+            )
+            ->willReturn("ok");
+
+        $method = new \ReflectionMethod(SkillExecutor::class, "processLLMCall");
+        $method->setAccessible(true);
+
+        $method->invoke(
+            $this->executor,
+            "my.skill.key",
+            [
+                "name" => "My Skill",
+                "system_instructions" => "Some instructions",
+            ],
+            "/path/to/file.md",
+            [],
+            [],
+            false,
+        );
+    }
+
+    /**
+     * When the skill config specifies a model and temperature, those should
+     * be used when no caller overrides are provided.
+     */
+    #[Test]
+    public function processLLMCall_usesSkillConfigDefaultsWhenNoOverrides(): void
+    {
+        $this->aiService
+            ->expects($this->once())
+            ->method("complete")
+            ->with(
+                $this->callback(function (array $request): bool {
+                    return $request["temperature"] === 0.3 &&
+                        $request["max_tokens"] === 1024 &&
+                        $request["metadata"]["skill_model"] === "gpt-4o-mini";
+                }),
+            )
+            ->willReturn("ok");
+
+        $method = new \ReflectionMethod(SkillExecutor::class, "processLLMCall");
+        $method->setAccessible(true);
+
+        $method->invoke(
+            $this->executor,
+            "my.skill.key",
+            [
+                "name" => "My Skill",
+                "system_instructions" => "Instructions",
+                "model" => "gpt-4o-mini",
+                "temperature" => 0.3,
+                "token_limits" => 1024,
+            ],
+            "/path/to/file.md",
+            [],
+            [],
+            false,
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────
-    // execute() – grouped block path
+    // executeGroupedBlock()
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * When the skill key contains "batch_draft_engine", execute() should
-     * route to executeGroupedBlock, aggregate Phase A sub-agent skill files
-     * into a combined system prompt, and mark the call as aggregated in
-     * the metadata.
+     * batch_draft_engine should aggregate Phase A sub-agents into a combined
+     * system prompt and mark the call as aggregated.
      */
     #[Test]
-    public function execute_routesToGroupedBlockForDraftEngine(): void
+    public function executeGroupedBlock_aggregatesDraftEngineSubAgents(): void
     {
         $this->aiService
             ->expects($this->once())
@@ -147,15 +215,12 @@ class SkillExecutorTest extends TestCase
             )
             ->willReturn("Drafted content");
 
-        // We test via reflection since grouped block resolution depends
-        // on file system paths that we set up in the fixture.
         $method = new \ReflectionMethod(
             SkillExecutor::class,
             "executeGroupedBlock",
         );
         $method->setAccessible(true);
 
-        // Create the sub-agent fixture files the method will try to resolve.
         $this->createSubAgentFixtures([
             "topic_sentence_opener",
             "list_bullet_generator",
@@ -173,13 +238,11 @@ class SkillExecutorTest extends TestCase
     }
 
     /**
-     * When the skill key contains "batch_expand_engine", execute() should
-     * route to executeGroupedBlock, aggregate Phase B sub-agent skill files
-     * into a combined system prompt, and mark the call as aggregated in
-     * the metadata.
+     * batch_expand_engine should aggregate Phase B sub-agents into a combined
+     * system prompt and mark the call as aggregated.
      */
     #[Test]
-    public function execute_routesToGroupedBlockForExpandEngine(): void
+    public function executeGroupedBlock_aggregatesExpandEngineSubAgents(): void
     {
         $this->aiService
             ->expects($this->once())
@@ -219,14 +282,9 @@ class SkillExecutorTest extends TestCase
     // resolveFilePath()
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Keys ending in ".skills" should resolve to a file with the
-     * ".skills.md" extension, with dots converted to directory separators.
-     */
     #[Test]
     public function resolveFilePath_convertsSkillsSuffixToSkillsMdExtension(): void
     {
-        // Create the expected file.
         $dir = $this->tempDir . "/track/core_writing/body_content";
         mkdir($dir, 0755, true);
         $filePath = $dir . "/topic_sentence_opener.skills.md";
@@ -241,14 +299,10 @@ class SkillExecutorTest extends TestCase
             DIRECTORY_SEPARATOR .
             "topic_sentence_opener.skills.md";
 
-        // Verify the file we created matches the expected relative structure.
         $this->assertFileExists($filePath);
         $this->assertStringEndsWith($expectedRelative, $filePath);
     }
 
-    /**
-     * Keys NOT ending in ".skills" should resolve to a ".md" file.
-     */
     #[Test]
     public function resolveFilePath_convertsPlainKeyToMdExtension(): void
     {
@@ -260,10 +314,6 @@ class SkillExecutorTest extends TestCase
         $this->assertFileExists($filePath);
     }
 
-    /**
-     * When no file can be found at any resolution path, an
-     * InvalidArgumentException should be thrown with a descriptive message.
-     */
     #[Test]
     public function resolveFilePath_throwsWhenFileNotFound(): void
     {
@@ -285,11 +335,6 @@ class SkillExecutorTest extends TestCase
     // loadFileContent()
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * loadFileContent() should cache file contents in the static
-     * $loadedPrompts array and return the same value on subsequent calls
-     * without re-reading the file from disk.
-     */
     #[Test]
     public function loadFileContent_cachesResultInStaticProperty(): void
     {
@@ -305,7 +350,6 @@ class SkillExecutorTest extends TestCase
         $firstCall = $method->invoke($this->executor, $filePath);
         $this->assertSame("original content", $firstCall);
 
-        // Modify the file on disk – the cached value should still be returned.
         file_put_contents($filePath, "modified content");
         $secondCall = $method->invoke($this->executor, $filePath);
         $this->assertSame("original content", $secondCall);
@@ -315,11 +359,6 @@ class SkillExecutorTest extends TestCase
     // parsePlaceholders()
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Scalar variables should replace their corresponding {{ key }}
-     * placeholders in the template. Non-scalar values and unmatched
-     * placeholders should remain untouched.
-     */
     #[Test]
     #[DataProvider("placeholderProvider")]
     public function parsePlaceholders_replacesScalarValues(
@@ -338,8 +377,6 @@ class SkillExecutorTest extends TestCase
     }
 
     /**
-     * Data provider for parsePlaceholders tests.
-     *
      * @return array<string, array{0: string, 1: array, 2: string}>
      */
     public static function placeholderProvider(): array
@@ -387,11 +424,6 @@ class SkillExecutorTest extends TestCase
     // buildPromptPayload()
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * buildPromptPayload() should produce a payload with three clearly
-     * delimited sections: system protocols, contextual data workspace,
-     * and execution run instruction.
-     */
     #[Test]
     public function buildPromptPayload_includesAllThreeSections(): void
     {
@@ -421,10 +453,6 @@ class SkillExecutorTest extends TestCase
         $this->assertStringContainsString("=== EXECUTION RUN ===", $result);
     }
 
-    /**
-     * Array variables should be rendered as pretty-printed JSON under
-     * a "Data Object" label, not as a simple key-value line.
-     */
     #[Test]
     public function buildPromptPayload_rendersArraysAsJson(): void
     {
@@ -443,9 +471,6 @@ class SkillExecutorTest extends TestCase
         $this->assertStringContainsString('"banana"', $result);
     }
 
-    /**
-     * Object variables should be rendered as JSON under a "Data Object" label.
-     */
     #[Test]
     public function buildPromptPayload_rendersObjectsAsJson(): void
     {
@@ -464,57 +489,9 @@ class SkillExecutorTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // processLLMCall() – metadata & error logging
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * processLLMCall() should pass correct metadata (skill key, source,
-     * aggregated flag) and the compiled system prompt to the agent service
-     * within the structured request array.
-     */
-    #[Test]
-    public function processLLMCall_passesCorrectMetadata(): void
-    {
-        $this->aiService
-            ->expects($this->once())
-            ->method("complete")
-            ->with(
-                $this->callback(function (array $request): bool {
-                    return $request["system_prompt"] === "Some instructions" &&
-                        $request["metadata"]["skill_executed"] ===
-                            "my.skill.key" &&
-                        $request["metadata"]["resolved_file"] ===
-                            "/path/to/file.md" &&
-                        $request["metadata"]["is_aggregated"] === false;
-                }),
-            )
-            ->willReturn("ok");
-
-        $method = new \ReflectionMethod(SkillExecutor::class, "processLLMCall");
-        $method->setAccessible(true);
-
-        $method->invoke(
-            $this->executor,
-            "my.skill.key",
-            "Some instructions",
-            "/path/to/file.md",
-            [],
-            [],
-            false,
-        );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Create fixture skill files for the given sub-agent names under
-     * the temporary directory, mimicking the expected path structure
-     * that resolveFilePath() would produce for grouped block keys.
-     *
-     * @param string[] $agentNames Dot-notation-free agent names.
-     */
     private function createSubAgentFixtures(array $agentNames): void
     {
         $baseDir = $this->tempDir . "/track/core_writing/body_content";
@@ -529,11 +506,6 @@ class SkillExecutorTest extends TestCase
         }
     }
 
-    /**
-     * Recursively remove a directory and all its contents.
-     *
-     * Used in tearDown to clean up fixture files created during the test.
-     */
     private function removeDirectory(string $dir): void
     {
         if (!is_dir($dir)) {

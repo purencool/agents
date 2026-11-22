@@ -247,7 +247,7 @@ class AgentService implements AgentServiceInterface
         }
 
         $agent = $this->createAgent($this->extractOptions($request));
-        $agent->setThreadId("one-shot");
+        $agent->setThreadId(uniqid("one-shot-", true));
         $agent->setInstructions($prompts["system_prompt"]);
 
         try {
@@ -255,6 +255,15 @@ class AgentService implements AgentServiceInterface
                 ->chat(new UserMessage($prompts["user_prompt"]))
                 ->getMessage()
                 ->getContent();
+
+            if ($content === null) {
+                Log::warning(
+                    "AgentService::complete — model returned null content",
+                    [
+                        "metadata" => $request["metadata"] ?? [],
+                    ],
+                );
+            }
 
             return $content ?? "";
         } catch (\Throwable $e) {

@@ -1,0 +1,133 @@
+{
+  "name": "default",
+  "description": "Generates a full documentation article using a multi-stage skill pipeline.",
+  "stages": [
+    {
+      "id": "outline",
+      "skill": "research_preparation.outline_generator",
+      "variables": {
+        "title": "{{title}}",
+        "description": "{{research_text}}",
+        "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+      },
+      "options": { "temperature": 0.2 },
+      "output_key": "outline"
+    },
+    {
+      "id": "sections",
+      "skill": "orchestration.document_orchestrator",
+      "variables": {
+        "outline": "{{outline}}",
+        "format_instruction": "Convert the outline sections into a plain JSON array of strings.",
+        "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+      },
+      "options": { "temperature": 0.1 },
+      "output_key": "sections_json",
+      "transform": "strip_code_fence"
+    },
+    {
+      "id": "sections_loop",
+      "type": "loop",
+      "source": "{{sections_json}}",
+      "item_key": "section",
+      "stages": [
+        {
+          "id": "draft",
+          "skill": "core_writing.body_content.batch_draft_engine",
+          "variables": {
+            "section": "{{section}}",
+            "outline": "{{outline}}",
+            "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+          },
+          "options": { "temperature": 0.2 },
+          "output_key": "core_draft"
+        },
+        {
+          "id": "insight",
+          "skill": "core_writing.body_content.analogy_example_creator",
+          "variables": {
+            "section": "{{section}}",
+            "content": "{{core_draft}}",
+            "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+          },
+          "options": { "temperature": 0.3 },
+          "output_key": "insight_content"
+        },
+        {
+          "id": "critique",
+          "skill": "core_writing.body_content.counter_argument_builder",
+          "variables": {
+            "section": "{{section}}",
+            "content": "{{insight_content}}",
+            "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+          },
+          "options": { "temperature": 0.2 },
+          "output_key": "critique_content"
+        },
+        {
+          "id": "expand",
+          "skill": "core_writing.body_content.batch_expand_engine",
+          "variables": {
+            "section": "{{section}}",
+            "content": "{{critique_content}}",
+            "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+          },
+          "options": { "temperature": 0.2 },
+          "output_key": "value_content"
+        },
+        {
+          "id": "polish",
+          "skill": "{{track_key}}.core_writing.body_content.internal_transition_smoother",
+          "variables": {
+            "content": "{{critique_content}}\n\n{{value_content}}",
+            "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+          },
+          "options": { "temperature": 0.2 },
+          "output_key": "polished_section"
+        }
+      ],
+      "accumulate": {
+        "key": "body_canvas",
+        "template": "\n\n## {{section}}\n\n{{polished_section}}"
+      }
+    },
+    {
+      "id": "introduction",
+      "skill": "core_writing.hook_introduction_writer",
+      "variables": {
+        "title": "{{title}}",
+        "description": "{{research_text}}",
+        "body_context": "{{body_canvas}}",
+        "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+      },
+      "options": { "temperature": 0.4 },
+      "output_key": "introduction"
+    },
+    {
+      "id": "conclusion",
+      "skill": "core_writing.conclusion_writer",
+      "variables": {
+        "introduction": "{{introduction}}",
+        "body": "{{body_canvas}}",
+        "tone": "{{type}}",
+        "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+      },
+      "options": { "temperature": 0.3 },
+      "output_key": "conclusion"
+    },
+    {
+      "id": "final_format",
+      "skill": "review_refinement.formatting_markdown_expert",
+      "variables": {
+        "content": "# {{title}}\n\n{{introduction}}\n\n{{body_canvas}}\n\n## Conclusion\n\n{{conclusion}}",
+        "refinement_context": "\n\n## Research Findings\n{{research_text}}"
+      },
+      "options": { "temperature": 0.1 },
+      "output_key": "final_output"
+    }
+  ],
+  "persist": {
+    "path": "{{domain_dir}}",
+    "filename": "{{content_md_basename}}"
+  }
+}
