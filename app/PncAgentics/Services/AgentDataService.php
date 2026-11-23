@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 namespace App\PncAgentics\Services;
 
-use App\PncAgentics\Contracts\AgentDataInterface;
+use App\PncAgentics\Contracts\AgentDataServiceInterface;
 use App\PncAgentics\Actions\CreateAgentStructureAction;
 use App\PncAgentics\Actions\ResearchAgentContentAction;
 use App\PncAgentics\Actions\WorkFlowAgentContentAction;
@@ -23,7 +23,7 @@ use App\PncAgentics\Actions\TemplateAgentContentAction;
  * Delegates each pipeline stage to a dedicated Action class:
  * structure → template → research → workflow → save.
  */
-class AgentDataService implements AgentDataInterface
+class AgentDataService implements AgentDataServiceInterface
 {
     public function __construct(
         protected CreateAgentStructureAction $createStructureAction,
@@ -129,14 +129,17 @@ class AgentDataService implements AgentDataInterface
     public function executeCreationPipeline(array $data): array
     {
         $structure = $this->createStructure($data);
+
+        // This needs to be add to the research json object.
         $research = $this->runResearch($structure);
-        $workFlow = $this->runWorkFlow($research);
-        $template = $this->applyTemplate($workFlow);
+        $workflow = $this->runWorkFlow($structure);
+        dd($workflow);
+        $template = $this->applyTemplate($workflow);
 
         return [
             "structure" => $structure,
             "research" => $research,
-            "work_flow" => $workFlow,
+            "work_flow" => $workflow,
             "template" => $template,
         ];
     }

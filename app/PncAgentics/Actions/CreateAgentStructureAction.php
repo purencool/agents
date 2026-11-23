@@ -60,16 +60,19 @@ class CreateAgentStructureAction
      * @param array{
      *     title: string,
      *     description?: string,
-     *     domains: array<string, array<string, array{
-     *         content_tracks?: array{
-     *             config?: array{
-     *                 workflow?: string,
-     *                 template?: string,
-     *                 track?: string,
-     *                 type?: string,
-     *                 lang?: string
+     *     domains: array<string, array{
+     *         context?: string,
+     *         fields: array<string, array{
+     *             content_tracks?: array{
+     *                 config?: array{
+     *                     workflow?: string,
+     *                     template?: string,
+     *                     track?: string,
+     *                     type?: string,
+     *                     lang?: string
+     *                 }
      *             }
-     *         }
+     *         }>
      *     }>>
      * } $data Validated payload with title, optional description, and domain/track config.
      *
@@ -101,34 +104,36 @@ class CreateAgentStructureAction
         $description = $data["description"] ?? "";
         $domains = $data["domains"] ?? [];
 
+        $categories = array_map(
+            "trim",
+            explode(",", $data["categories"] ?? "none"),
+        );
+
         $now = now();
         $year = $now->format("Y");
         $dateTime = $now->format("Y_m_d_His");
         $uuid = (string) Str::uuid();
 
-        $domainDir = "{$this->basePath}/domains/{$year}/{$uuid}/{$dateTime}";
+        $domainDir = "{$this->basePath}/content/{$year}/{$uuid}/{$dateTime}";
         $assetsDir = "{$domainDir}/assets";
-        $researchDir = "{$this->basePath}/research/{$year}/{$uuid}/{$dateTime}";
+        $researchDir = "{$this->basePath}/content/{$year}/{$uuid}/{$dateTime}/research";
 
         $this->ensureDirectory($domainDir);
         $this->ensureDirectory($assetsDir);
         $this->ensureDirectory($researchDir);
-
-        file_put_contents(
-            "{$researchDir}/research.json",
-            json_encode(
-                ["uuid" => $uuid],
-                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
-            ),
-        );
 
         $trackFiles = [];
 
         foreach ($domains as $domain => $types) {
             $domainSlug = Str::slug($domain, "_");
 
+            // No more "fields" wrapper — $types IS the type map
             foreach ($types as $type => $typeConfig) {
                 $typeSlug = Str::slug($type, "_");
+
+                // context is now per-type
+                $context = $typeConfig["context"] ?? "";
+
                 $trackCfg = $typeConfig["content_tracks"]["config"] ?? [];
 
                 $workflow = $trackCfg["workflow"] ?? "default";
@@ -143,62 +148,69 @@ class CreateAgentStructureAction
 
                 foreach ($langs as $lang) {
                     $fileBase = "{$domainSlug}-{$titleSlug}-{$typeSlug}-{$lang}";
+                    $this->ensureDirectory("{$domainDir}/{$domainSlug}");
+                    $this->ensureDirectory(
+                        "{$domainDir}/{$domainSlug}/{$typeSlug}-{$lang}",
+                    );
+                    $contentJsonPath = "{$domainDir}/{$domainSlug}/{$typeSlug}-{$lang}/{$fileBase}-content.json";
+                    $contentMdPath = "{$domainDir}/{$domainSlug}/{$typeSlug}-{$lang}/{$fileBase}-content.md";
+                    $descriptionMdPath = "{$domainDir}/{$domainSlug}/{$typeSlug}-{$lang}/{$fileBase}-description.md";
 
-                    $contentJsonPath = "{$domainDir}/{$fileBase}-content.json";
-                    $contentMdPath = "{$domainDir}/{$fileBase}-content.md";
-                    $descriptionMdPath = "{$domainDir}/{$fileBase}-description.md";
-
-                    $contentData = [
+                    // Key includes lang to avoid overwriting multi-lang entries
+                    $trackFiles["{$domain}"]["{$typeSlug}-{$lang}"] = [
                         "uuid" => $uuid,
-                        "description" => $description,
                         "title" => $title,
+                        "categories" => $categories,
+                        "workflow" => $workflow,
+                        "lang" => $lang,
                         "domain" => $domain,
+                        "context" => $context,
                         "type" => $type,
                         "template" => $template,
                         "track" => $track,
                         "track_type" => $trackType,
-                        "workflow" => $workflow,
-                        "lang" => $lang,
-                        "html_content" => "",
-                        "markdown_content" => "",
-                        "fields" => [],
+                        "content_json" => "",
+                        "content_path_json" => $contentJsonPath,
+                        "content_html" => "",
+                        "content_path_html" => "",
+                        "content_markdown" => "",
+                        "content_path_markdown" => $contentMdPath,
+                        "content_description" => $descriptionMdPath,
                     ];
 
                     file_put_contents(
                         $contentJsonPath,
                         json_encode(
-                            $contentData,
+                            [
+                                [
+                                    "content" =>
+                                        $trackFiles["{$domain}"][
+                                            "{$typeSlug}-{$lang}"
+                                        ],
+                                ],
+                            ],
                             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
                         ),
                     );
                     file_put_contents($contentMdPath, "");
                     file_put_contents($descriptionMdPath, $description);
-
-                    $trackFiles["{$domain}/{$type}/{$lang}"] = [
-                        "domain" => $domain,
-                        "type" => $type,
-                        "template" => $template,
-                        "track" => $track,
-                        "track_type" => $trackType,
-                        "workflow" => $workflow,
-                        "lang" => $lang,
-                        "content_json" => $contentJsonPath,
-                        "content_md" => $contentMdPath,
-                        "description_md" => $descriptionMdPath,
-                    ];
                 }
             }
         }
 
-        return [
+        $structure = [
             "uuid" => $uuid,
             "title" => $title,
             "title_slug" => $titleSlug,
+            "description" => $description,
+            "categories" => $categories,
             "domain_dir" => $domainDir,
             "assets_dir" => $assetsDir,
             "research_dir" => $researchDir,
             "tracks" => $trackFiles,
         ];
+
+        return $structure;
     }
 
     /**

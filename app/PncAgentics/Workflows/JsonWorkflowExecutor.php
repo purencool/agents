@@ -14,20 +14,19 @@ namespace App\PncAgentics\Workflows;
 use App\PncAgentics\Contracts\LoopStageExecutorContractInterface;
 use App\PncAgentics\Contracts\LoopStageResolverContractInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
-use App\PncServices\Contracts\ContentPersistenceInterface;
 
 /**
  * Data-driven workflow executor.
  *
  * Orchestrates the execution of a JSON workflow definition by:
  *  - Loading the definition via {@see WorkflowDefinitionLoader}
- *    (3-tier resolution: overlay → config override → default dir, with
- *    fallback to "default.json").
+ *    (override dir → default dir, with fallback to "default.json").
  *  - Dispatching linear stages directly (skill call → transform → store in context).
  *  - Dispatching loop stages via {@see LoopStageExecutor}
  *    (iteration, per-iteration reset, sub-stage execution, accumulation).
- *  - Persisting the final output via {@see WorkflowPersister} when a
- *    "persist" block is defined in the workflow JSON.
+ *
+ * Output persistence is handled externally (by the template/transformer
+ * layer) — this class returns the result and does not write to disk.
  *
  * This class implements the contracts required by {@see LoopStageExecutor}:
  *  - {@see LoopStageExecutorContractInterface} — provides executeStage().
@@ -52,22 +51,13 @@ use App\PncServices\Contracts\ContentPersistenceInterface;
  *         "stages": [ ... ],
  *         "accumulate": { "key": "body", "template": "## {{section}}\n{{output}}" }
  *       }
- *     ],
- *     "persist": {
- *       "path": "{{domain_dir}}",
- *       "filename": "{{title_slug}}.md",
- *       "output_key": "body"
- *     }
+ *     ]
  *   }
  *
  * @example
  *   $executor = app(JsonWorkflowExecutor::class);
- *   $output = $executor->execute("universal_documentation", [
- *       "title"         => "My Article",
- *       "research_text" => "Pre-gathered research...",
- *       "domain_dir"    => "/output/articles",
- *       "title_slug"    => "my-article",
- *   ]);
+ *   $result = $executor->execute($structure);
+ *   $output = $result["workflow_results"];
  */
 class JsonWorkflowExecutor implements
     LoopStageExecutorContractInterface,
@@ -75,7 +65,6 @@ class JsonWorkflowExecutor implements
 {
     /**
      * Resolves and loads workflow definition JSON files from disk.
-     * Handles the 3-tier resolution order and default.json fallback.
      */
     protected WorkflowDefinitionLoader $loader;
 
@@ -96,27 +85,13 @@ class JsonWorkflowExecutor implements
     protected StageTransform $transform;
 
     /**
-     * Persists the final workflow output to disk via ContentPersistenceInterface.
+     * @param SkillExecutorInterface $executor The skill executor for LLM calls.
      */
-    protected WorkflowPersister $persister;
-
-    /**
-     * @param SkillExecutorInterface      $executor       The skill executor for LLM calls.
-     * @param ContentPersistenceInterface $persistence    Content persistence service.
-     * @param string                      $definitionsDir Base directory for default workflow JSON files.
-     */
-    public function __construct(
-        protected SkillExecutorInterface $executor,
-        protected ContentPersistenceInterface $persistence,
-        protected string $definitionsDir,
-    ) {
-        $this->loader = new WorkflowDefinitionLoader($definitionsDir);
+    public function __construct(protected SkillExecutorInterface $executor)
+    {
+        $this->loader = new WorkflowDefinitionLoader();
         $this->resolver = new TemplateResolver();
         $this->transform = new StageTransform();
-        $this->persister = new WorkflowPersister(
-            $this->persistence,
-            $this->resolver,
-        );
         $this->loopExecutor = new LoopStageExecutor($this, $this);
     }
 
@@ -124,28 +99,27 @@ class JsonWorkflowExecutor implements
      * Execute a workflow by name.
      *
      * Execution flow:
-     *  1. Load the workflow definition (delegated to WorkflowDefinitionLoader).
-     *  2. Iterate through each stage in order:
+     *  1. Build a flat context from the structure.
+     *  2. Load the workflow definition (delegated to WorkflowDefinitionLoader).
+     *  3. Iterate through each stage in order:
      *     - Loop stages (type === "loop") → delegated to LoopStageExecutor.
      *     - Linear stages → executed via executeStage().
-     *  3. If a "persist" block is defined, persist the output to disk.
-     *  4. Return the context value corresponding to the last stage's
-     *     "output_key" (or "accumulate.key" for loop stages).
+     *  4. Extract the final output and attach it to the structure.
      *
-     * The return value is always a string. If the final context value is an
-     * array (e.g. from a json_decode transform), it is JSON-encoded.
+     * The original $structure is never mutated by stage execution —
+     * a separate context array is used for the workflow's working state.
      *
-     * @param string $workflowName The workflow identifier (filename without .json).
-     * @param array  $context      Initial context variables available to all stages
-     *                             (e.g. "title", "research_text", "domain_dir", "type").
+     * @param array $structure The full content structure from upstream actions.
      *
-     * @return string The final output from the last stage's output_key, or "" if no output key is defined.
+     * @return array The same structure with "workflow_results" added.
      *
      * @throws \RuntimeException When the workflow definition file is not found or contains invalid JSON.
      */
-    public function execute(string $workflowName, array $context): string
+    public function execute(array $structure): array
     {
-        $definition = $this->loader->load($workflowName);
+        $context = $this->buildContext($structure);
+
+        $definition = $this->loader->load($context["workflow"]);
 
         foreach ($definition["stages"] as $stage) {
             if (isset($stage["type"]) && $stage["type"] === "loop") {
@@ -155,21 +129,19 @@ class JsonWorkflowExecutor implements
             }
         }
 
-        if (!empty($definition["persist"])) {
-            $this->persister->persist($definition["persist"], $context);
-        }
-
         $lastStage = $definition["stages"][count($definition["stages"]) - 1];
         $outputKey =
             $lastStage["output_key"] ??
             ($lastStage["accumulate"]["key"] ?? null);
 
-        if ($outputKey === null) {
-            return "";
+        $raw = $outputKey !== null ? $context[$outputKey] ?? "" : "";
+
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            $raw = is_array($decoded) ? $decoded : ["text" => $raw];
         }
 
-        $result = $context[$outputKey] ?? "";
-        return is_array($result) ? json_encode($result) : (string) $result;
+        return $raw;
     }
 
     /**
@@ -177,20 +149,15 @@ class JsonWorkflowExecutor implements
      *
      * Execution flow:
      *  1. Resolve {{key}} variables from context (via TemplateResolver).
-     *  2. Resolve the "skill" field (supports {{key}} interpolation for
-     *     dynamic skill selection from context).
+     *  2. Resolve the "skill" field (supports {{key}} interpolation).
      *  3. Call the skill executor with the resolved skill name, variables,
      *     and options.
      *  4. If a "transform" is defined, apply it to the result.
-     *  5. Store the (possibly transformed) result in context under
-     *     the stage's "output_key".
+     *  5. Store the result in context under the stage's "output_key".
      *
      * Satisfies {@see LoopStageExecutorContractInterface::executeStage()}.
      *
      * @param array $stage   Stage definition from the workflow JSON.
-     *                       Required keys: "skill", "output_key".
-     *                       Optional keys: "variables" (array of {{key}} templates),
-     *                       "options" (LLM config overrides), "transform" (string).
      * @param array $context Mutable context (modified in-place).
      */
     public function executeStage(array $stage, array &$context): void
@@ -217,16 +184,12 @@ class JsonWorkflowExecutor implements
     /**
      * Resolve a single template string from context.
      *
-     * If the entire string is a single {{key}}, the raw context value is
-     * returned (preserving type — arrays, numbers, etc.). Otherwise, the
-     * string is treated as a template and all placeholders are replaced.
-     *
      * Satisfies {@see LoopStageResolverContractInterface::resolveVariable()}.
      *
      * @param string $key     Template string with {{key}} placeholders.
      * @param array  $context Current context.
      *
-     * @return mixed The resolved value (raw value if single key reference, string if template).
+     * @return mixed The resolved value.
      */
     public function resolveVariable(string $key, array $context): mixed
     {
@@ -236,19 +199,50 @@ class JsonWorkflowExecutor implements
     /**
      * Replace all {{key}} placeholders in a template string with context values.
      *
-     * Placeholders that don't match a context key are replaced with an
-     * empty string. Array and object values are JSON-encoded to prevent
-     * "Array to string conversion" errors.
-     *
      * Satisfies {@see LoopStageResolverContractInterface::resolveTemplate()}.
      *
      * @param string $template Template string.
      * @param array  $context  Current context.
      *
-     * @return string The template with all resolvable placeholders replaced.
+     * @return string The resolved template.
      */
     public function resolveTemplate(string $template, array $context): string
     {
         return $this->resolver->resolveTemplate($template, $context);
+    }
+
+    /**
+     * Build a flat context array from the structure for workflow template resolution.
+     *
+     * The original $structure is never mutated — stage outputs are stored
+     * in this separate array.
+     *
+     * @param array<string, mixed> $structure The full content structure.
+     *
+     * @return array<string, mixed> Flat context for stage execution.
+     */
+    protected function buildContext(array $structure): array
+    {
+        $track = $structure["tracks"];
+
+        return [
+            "title" => $structure["title"],
+            "title_slug" => $structure["title_slug"],
+            "uuid" => $structure["uuid"],
+            "domain_dir" => $structure["domain_dir"],
+            "assets_dir" => $structure["assets_dir"],
+            "research_dir" => $structure["research_dir"],
+            "research_text" => $track["research_text"] ?? "",
+            "domain" => $track["domain"],
+            "type" => $track["type"],
+            "template" => $track["template"],
+            "track" => $track["track"],
+            "track_type" => $track["track_type"],
+            "workflow" => $track["workflow"],
+            "lang" => $track["lang"],
+            "content_json" => $track["content_json"],
+            "content_md" => $track["content_md"],
+            "description_md" => $track["description_md"],
+        ];
     }
 }

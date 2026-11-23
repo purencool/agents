@@ -12,7 +12,6 @@ declare(strict_types=1);
 namespace App\PncAgentics\Actions;
 
 use App\PncAgentics\Workflows\ResearchGatherer;
-use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -50,6 +49,7 @@ class ResearchAgentContentAction
     public function execute(array $structure): array
     {
         $researchDir = $structure["research_dir"] ?? null;
+        $uuid = $structure["uuid"] ?? null;
 
         if ($researchDir === null) {
             throw new RuntimeException(
@@ -57,17 +57,16 @@ class ResearchAgentContentAction
             );
         }
 
-        foreach ($structure["tracks"] as $key => $track) {
-            $payload = [
-                "title" => $structure["title"],
-                "domain" => $track["domain"],
-            ];
+        $result = $this->gatherer->gather($structure);
 
-            $structure["tracks"][$key][
-                "research_text"
-            ] = $this->gatherer->gather($payload, $researchDir);
-        }
+        file_put_contents(
+            "{$researchDir}/research.json",
+            json_encode(
+                [["uuid" => $uuid], ["data" => $result]],
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+            ),
+        );
 
-        return $structure;
+        return $result;
     }
 }

@@ -11,34 +11,22 @@ declare(strict_types=1);
 
 namespace App\PncAgentics\Actions;
 
-use App\PncServices\Contracts\ContentPersistenceInterface;
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use Illuminate\Support\Facades\Concurrency;
 
 /**
  * Orchestrates parallel template transformation for all tracks.
  *
- * Contains NO transformation logic — only concurrency, data loading,
- * and error recovery. All "what to do with each track" lives in
- * TemplateTransformerService.
- *
- * Execution strategy:
- *  1. Builds one closure per track from the structure array.
- *  2. Attempts parallel execution via Concurrency::driver("fork").
- *  3. Falls back to sequential execution if the driver is "sync"
- *     or if the parallel run throws.
- *  4. In fallback mode, per-track exceptions are caught and returned
- *     as error strings without aborting the remaining tracks.
+ * Receives the workflow_results array (from JsonWorkflowExecutor) and
+ * passes it directly to the transformer per track — no disk I/O.
  */
 class TemplateAgentContentAction
 {
     /**
-     * @param TemplateTransformerInterface $transformer        Handles per-track transformation.
-     * @param ContentPersistenceInterface  $contentPersistence Reads content JSON files.
+     * @param TemplateTransformerInterface $transformer Handles per-track transformation.
      */
     public function __construct(
         private TemplateTransformerInterface $transformer,
-        private ContentPersistenceInterface $contentPersistence,
     ) {}
 
     /**
@@ -47,25 +35,43 @@ class TemplateAgentContentAction
      * Each track's content JSON is loaded, passed to the transformer
      * along with the track info, and the result is persisted.
      *
-     * @param array $structure Pipeline structure containing a "tracks" key,
-     *                         where each value is a track info array with at
-     *                         minimum: template, content_json, content_md.
+     * @param array
+     *     uuid: string,
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string,
+     *     title: string,
+     *     title_slug: string,
+     *     workflow_result: array[]
+     *     tracks: array<string, array[
+     *         domain: string,
+     *         type: string,
+     *         template: string,
+     *         track: string,
+     *         track_type: string,
+     *         workflow: string,
+     *         lang: string,
+     *         content_json: string,
+     *         content_md: string,
+     *         description_md: string,
+     *         research_text: string
+     *     ]>
+     * ]
      *
      * @return array<string, string> Result messages keyed by track name.
-     *                               Success: "Success: [key] saved at [dir]."
-     *                               Failure: "Error: [key] [message]"
      */
     public function execute(array $structure): array
     {
+        $contentData = $structure["workflow_results"] ?? [];
+
         $tasks = [];
 
         foreach ($structure["tracks"] as $key => $trackInfo) {
-            $tasks[$key] = function () use ($trackInfo, $key): string {
-                $contentData =
-                    $this->contentPersistence->readJson(
-                        $trackInfo["content_json"],
-                    ) ?? [];
-
+            $tasks[$key] = function () use (
+                $trackInfo,
+                $key,
+                $contentData,
+            ): string {
                 $result = $this->transformer->transform(
                     $trackInfo["template"],
                     $trackInfo,
@@ -76,7 +82,7 @@ class TemplateAgentContentAction
             };
         }
 
-        $timeout = (int) config("pncservices.ai.timeout", 600);
+        $timeout = (int) config("pnc.ai.timeout", 600);
 
         try {
             if (config("concurrency.default") === "sync") {

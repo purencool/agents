@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands\Pnc;
 
-use App\PncAgentics\Contracts\AgentDataInterface;
+use App\PncAgentics\Contracts\AgentDataServiceInterface;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Console\Command;
 
@@ -20,7 +20,7 @@ class DataCreation extends Command
     protected $signature = "pnc:agent:data:creation {data : The raw JSON string object}";
     protected $description = "Accepts a JSON payload to create structure and batch generate AI assets";
 
-    public function handle(AgentDataInterface $agentData): int
+    public function handle(AgentDataServiceInterface $agentData): int
     {
         $totalJobStart = microtime(true);
 

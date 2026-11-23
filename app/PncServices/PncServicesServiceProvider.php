@@ -37,12 +37,4 @@ class PncServicesServiceProvider extends ServiceProvider
             FileContentPersistence::class,
         );
     }
-
-    public function boot(): void
-    {
-        $this->mergeConfigFrom(
-            __DIR__ . "/../../config/pnc.php",
-            "pncservices",
-        );
-    }
 }

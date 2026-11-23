@@ -37,10 +37,7 @@ use Illuminate\Support\Facades\File;
  */
 class WorkflowDefinitionLoader
 {
-    /**
-     * @param string $definitionsDir Base directory for default workflow JSON files.
-     */
-    public function __construct(protected string $definitionsDir) {}
+    protected string $definitionsDir;
 
     /**
      * Load a workflow definition by name.
@@ -58,22 +55,15 @@ class WorkflowDefinitionLoader
      */
     public function load(string $workflowName): array
     {
+        $this->definitionsDir = config("pnc.workflows.definitions_dir");
+
         $fileName = "{$workflowName}.json";
 
-        // Check OVERLAY_WORKFLOWS env var (Docker / integration team).
-        $overlayDir = env("OVERLAY_WORKFLOWS");
-        if ($overlayDir) {
-            $overlayPath =
-                base_path($overlayDir) . DIRECTORY_SEPARATOR . $fileName;
-            if (File::exists($overlayPath)) {
-                return $this->decode($overlayPath);
-            }
-        }
-
-        // Check config-level override directory.
+        // Check override directory (set via OVERLAY_WORKFLOWS env → config).
         $configOverride = config("pnc.workflows.override_dir");
         if ($configOverride) {
-            $configPath = $configOverride . DIRECTORY_SEPARATOR . $fileName;
+            $configPath =
+                base_path($configOverride) . DIRECTORY_SEPARATOR . $fileName;
             if (File::exists($configPath)) {
                 return $this->decode($configPath);
             }
@@ -97,11 +87,9 @@ class WorkflowDefinitionLoader
             "Workflow definition not found: {$fileName}. " .
                 "Fallback default.json also not found. " .
                 "Searched: " .
-                (string) ($overlayDir
-                    ? base_path($overlayDir)
-                    : "(no OVERLAY_WORKFLOWS)") .
-                ", " .
-                (string) ($configOverride ?? "(no config override)") .
+                (string) ($configOverride
+                    ? base_path($configOverride)
+                    : "(no override)") .
                 ", " .
                 $this->definitionsDir,
         );

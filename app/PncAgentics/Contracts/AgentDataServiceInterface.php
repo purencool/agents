@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 namespace App\PncAgentics\Contracts;
 
-interface AgentDataInterface
+interface AgentDataServiceInterface
 {
     /**
      * Verifies and generates the agent filesystem hierarchy.

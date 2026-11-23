@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 namespace App\PncAgentics;
 
-use App\PncAgentics\Contracts\AgentDataInterface;
+use App\PncAgentics\Contracts\AgentDataServiceInterface;
 use App\PncAgentics\Services\AgentDataService;
 use App\PncAgentics\Contracts\AgentServiceInterface;
 use App\PncAgentics\Contracts\McpToolServiceInterface;
@@ -22,9 +22,7 @@ use App\PncAgentics\Services\AuditedSkillExecutor;
 use App\PncAgentics\Services\McpToolService;
 use App\PncAgentics\Services\SkillExecutor;
 use App\PncAgentics\Services\AgentService;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Str;
 use App\PncAgentics\Services\SkillRegistry;
 use App\PncAgentics\Contracts\SkillRegistryInterface;
 
@@ -49,7 +47,10 @@ class PncAgenticsServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(AgentDataInterface::class, AgentDataService::class);
+        $this->app->bind(
+            AgentDataServiceInterface::class,
+            AgentDataService::class,
+        );
         $this->app->bind(AgentServiceInterface::class, AgentService::class);
         $this->app->bind(SkillExecutorInterface::class, function ($app) {
             return new AuditedSkillExecutor($app->make(SkillExecutor::class));
@@ -65,32 +66,6 @@ class PncAgenticsServiceProvider extends ServiceProvider
             McpToolServiceInterface::class,
             McpToolService::class,
         );
-
-        $this->app->singleton("pnc.skills", function () {
-            $base = app_path("PncAgentics/Skills");
-            $skills = [];
-
-            if (File::isDirectory($base)) {
-                foreach (File::allFiles($base) as $file) {
-                    if ($file->getExtension() === "json") {
-                        $data = json_decode($file->getContents(), true);
-
-                        if (json_last_error() !== JSON_ERROR_NONE) {
-                            continue;
-                        }
-
-                        $name = $data["name"] ?? null;
-                        if ($name === null) {
-                            continue;
-                        }
-
-                        $skills[$name] = $data;
-                    }
-                }
-            }
-
-            return $skills;
-        });
     }
 
     /**

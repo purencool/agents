@@ -49,32 +49,26 @@ class ResearchGatherer
      * Saves all artifacts to the research directory and returns the
      * combined research text for injection into downstream refinement context.
      *
-     * @param array{
-     *     title: string,
-     *     url?: string,
-     *     domain?: string
-     * } $payload Must contain "title"; optionally "url" and "domain".
+     * @param $payload Must contain "title"; optionally "url" and "domain".
      *
-     * @param string $targetDirectory Absolute path to the research/ directory.
-     *
-     * @return string Combined research text (markdown sections separated by "---").
+     * @return array Combined research text (markdown sections separated by "---").
      *                Empty string if no source returns a successful result.
      */
-    public function gather(array $payload, string $targetDirectory): string
+    public function gather(array $payload): array
     {
-        $this->persistence->setPath($targetDirectory);
+        $this->persistence->setPath($payload["research_dir"]);
         $findings = [];
 
         $url = $payload["url"] ?? null;
         $topic = $payload["title"] ?? "";
-        $domain = $payload["domain"] ?? "";
+        $categories = $payload["categories"] ?? "";
 
         // Web fetch (conditional on URL)
         if ($url) {
             $fetch = $this->mcp->callWithArtifacts(
                 "web-fetch",
                 $url,
-                $targetDirectory,
+                $payload["research_dir"],
                 "source",
             );
             if ($fetch["success"]) {
@@ -111,32 +105,37 @@ class ResearchGatherer
         }
 
         // News (conditional on domain)
-        if ($domain) {
-            $news = $this->mcp->call("news", "{$domain} {$topic}");
-            if ($news["success"]) {
-                $this->persistence->saveJsonTo("news_results", $news["data"]);
-                $findings[] =
-                    "## Related News\n" .
-                    json_encode(
-                        array_slice($news["data"], 0, 3),
-                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
-                    );
-            }
+        $news = $this->mcp->call("news", "{$topic}");
+        if ($news["success"]) {
+            $this->persistence->saveJsonTo("news_results", $news["data"]);
+            $findings[] =
+                "## Related News\n" .
+                json_encode(
+                    array_slice($news["data"], 0, 3),
+                    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+                );
         }
 
         // Wikipedia
-        $wiki = $this->mcp->call("wikipedia", $topic);
+        $wiki_save = [];
+        foreach ($categories as $category) {
+            $wiki = $this->mcp->call("wikipedia", $category);
+            if ($wiki["success"]) {
+                $wiki_save[] = $wiki["data"];
+                $findings[] =
+                    "## Wikipedia\n" .
+                    ($wiki["data"]["extract"] ?? json_encode($wiki["data"]));
+            }
+        }
+
         if ($wiki["success"]) {
-            $this->persistence->saveJsonTo("wikipedia", $wiki["data"]);
-            $findings[] =
-                "## Wikipedia\n" .
-                ($wiki["data"]["extract"] ?? json_encode($wiki["data"]));
+            $this->persistence->saveJsonTo("wikipedia", $wiki_save);
         }
 
         // Save combined research context
         $researchText = implode("\n\n---\n\n", $findings);
         $this->persistence->saveMarkdown($researchText, "research_summary");
 
-        return $researchText;
+        return $findings;
     }
 }

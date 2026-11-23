@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace App\PncTemplates;
 
 use Illuminate\Support\ServiceProvider;
@@ -45,11 +44,6 @@ class PncTemplatesServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        if (file_exists(__DIR__ . "/config/templates.php")) {
-            $this->mergeConfigFrom(
-                __DIR__ . "/config/templates.php",
-                "templates",
-            );
-        }
+        //
     }
 }

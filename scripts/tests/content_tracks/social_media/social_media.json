@@ -1,21 +1,21 @@
 {
-  "title": "Can AI models be deployed on-premises and still function with the same performance, accuracy, and efficiency as cloud-hosted solutions?",
+  "title": "Can AI models be deployed on-premises and be affective?",
   "description": "[CONTEXT]:Can AI models be deployed on-premises and still function with the same performance, accuracy, and efficiency as cloud-hosted solutions?",
   "categories" : "AI, LLM's, Local Models",
   "domains":{
-  "example.com": {
-    "typeone":   { "content_tracks": { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en, ru"} } },
-    "typetwo":   { "content_tracks":  { "config": {"type": "social", "workflow":"default",  "template":"social", "track": "social_media", "lang": "en"} } },
-    "typethree": { "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
-  },
-  "house.au": {
-    "sales":  { "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
-  },
-  "blog.com": {
-    "blog":     { "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
-  },
-  "meeting.com": {
-    "meeting":   { "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+    "example.com": {
+        "typeone":   {"context": "This for marketing", "content_tracks": { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en, ru"} } },
+        "typetwo":   {"context": "This for developer", "content_tracks":  { "config": {"type": "social", "workflow":"default",  "template":"social", "track": "social_media", "lang": "en"} } },
+        "typethree": {"context": "This for sales", "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+      },
+    "house.au": {
+        "sales":  { "context": "This for marketing","content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+    },
+    "blog.com": {
+        "blog": {"context": "This for marketing", "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+    },
+    "meeting.com": {
+        "meeting": {"context": "This for marketing", "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+    }
   }
- }
 }
