@@ -35,28 +35,36 @@ class TemplateAgentContentAction
      * Each track's content JSON is loaded, passed to the transformer
      * along with the track info, and the result is persisted.
      *
-     * @param array
+     * @param array {
      *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
+     *     description: string,
+     *     categories: string[],
      *     domain_dir: string,
      *     assets_dir: string,
      *     research_dir: string,
-     *     title: string,
-     *     title_slug: string,
-     *     workflow_result: array[]
-     *     tracks: array<string, array[
+     *     tracks: array<string, array<string, array{
+     *         uuid: string,
+     *         title: string,
+     *         categories: string[],
+     *         workflow: string,
+     *         lang: string,
      *         domain: string,
+     *         context: string,
      *         type: string,
      *         template: string,
      *         track: string,
      *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
      *         content_json: string,
-     *         content_md: string,
-     *         description_md: string,
-     *         research_text: string
-     *     ]>
-     * ]
+     *         content_path_json: string,
+     *         content_html: string,
+     *         content_path_html: string,
+     *         content_markdown: string,
+     *         content_path_markdown: string,
+     *         content_description: string
+     *     }>>
+     * }
      *
      * @return array<string, string> Result messages keyed by track name.
      */

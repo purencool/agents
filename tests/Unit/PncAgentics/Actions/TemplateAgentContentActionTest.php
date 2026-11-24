@@ -12,7 +12,6 @@ declare(strict_types=1);
 namespace Tests\Unit\PncAgentics\Actions;
 
 use App\PncAgentics\Actions\TemplateAgentContentAction;
-use App\PncServices\Contracts\ContentPersistenceInterface;
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
 use Illuminate\Support\Facades\Concurrency;
 use Mockery;
@@ -23,14 +22,18 @@ use Tests\TestCase;
  * Unit tests for {@see TemplateAgentContentAction}.
  *
  * Verifies that execute():
- *  - Builds one task per track from the structure array.
- *  - Delegates to ContentPersistenceInterface::readJson() and
- *    TemplateTransformerInterface::transform() for each track.
- *  - Runs tasks in parallel via Concurrency when the driver is "fork".
- *  - Falls back to sequential execution when Concurrency fails
- *    or the default driver is "sync".
+ *  - Builds one task per track from the structure's "tracks" array.
+ *  - Delegates to TemplateTransformerInterface::transform() for each track,
+ *    passing (template, trackInfo, workflow_results).
+ *  - Runs tasks in parallel via Concurrency::driver("fork")->run() when
+ *    the default driver is not "sync".
+ *  - Falls back to sequential execution when the driver is "sync"
+ *    or when Concurrency throws.
  *  - Catches per-track exceptions in fallback mode and returns
  *    error messages instead of propagating.
+ *  - The timeout is read from config("pnc.ai.timeout", 600).
+ *
+ * @covers \App\PncAgentics\Actions\TemplateAgentContentAction
  */
 class TemplateAgentContentActionTest extends TestCase
 {
@@ -45,40 +48,64 @@ class TemplateAgentContentActionTest extends TestCase
     private Mockery\MockInterface $transformer;
 
     /**
-     * Mock for content persistence.
-     */
-    private Mockery\MockInterface $contentPersistence;
-
-    /**
-     * Sample structure with two tracks.
+     * Sample structure with two tracks and workflow_results.
+     *
+     * @var array{
+     *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string,
+     *     workflow_results: array,
+     *     tracks: array<string, array>
+     * }
      */
     private array $structure = [
-        "tracks" => [
-            "track1" => [
-                "template" => "blog_post",
-                "content_json" => "/data/track1/content.json",
-                "content_md" => "/data/track1/content.md",
-                "domain" => "blog.com",
-                "type" => "social",
-                "track" => "social_media",
-                "track_type" => "social",
-                "workflow" => "default",
-                "lang" => "en",
-                "description_md" => "/data/track1/desc.md",
-                "research_text" => "research",
+        "uuid" => "abc-123-def",
+        "title" => "Can AI models be deployed on-premises?",
+        "title_slug" => "can_ai_models_be_deployed_on_premises",
+        "domain_dir" => "/tmp/agents/abc-123-def",
+        "assets_dir" => "/tmp/agents/abc-123-def/assets",
+        "research_dir" => "/tmp/agents/abc-123-def/research",
+        "workflow_results" => [
+            "blog.com" => ["blog-en" => ["text" => "Generated blog content"]],
+            "meeting.com" => [
+                "meeting-en" => ["text" => "Generated meeting content"],
             ],
-            "track2" => [
-                "template" => "social",
-                "content_json" => "/data/track2/content.json",
-                "content_md" => "/data/track2/content.md",
+        ],
+        "tracks" => [
+            "blog.com/blog-en" => [
+                "domain" => "blog.com",
+                "type" => "blog",
+                "template" => "blog_post",
+                "track" => "blog_post",
+                "track_type" => "blog",
+                "workflow" => "blog_post",
+                "lang" => "en",
+                "context" => "This for marketing",
+                "content_path_json" =>
+                    "/tmp/agents/abc-123-def/blogcom/blog-en/content.json",
+                "content_path_markdown" =>
+                    "/tmp/agents/abc-123-def/blogcom/blog-en/content.md",
+                "content_description" =>
+                    "/tmp/agents/abc-123-def/blogcom/blog-en/desc.md",
+            ],
+            "meeting.com/meeting-en" => [
                 "domain" => "meeting.com",
-                "type" => "social",
+                "type" => "meeting",
+                "template" => "social_media",
                 "track" => "social_media",
                 "track_type" => "social",
-                "workflow" => "default",
+                "workflow" => "social_media",
                 "lang" => "en",
-                "description_md" => "/data/track2/desc.md",
-                "research_text" => "research2",
+                "context" => "This for security",
+                "content_path_json" =>
+                    "/tmp/agents/abc-123-def/meetingcom/meeting-en/content.json",
+                "content_path_markdown" =>
+                    "/tmp/agents/abc-123-def/meetingcom/meeting-en/content.md",
+                "content_description" =>
+                    "/tmp/agents/abc-123-def/meetingcom/meeting-en/desc.md",
             ],
         ],
     ];
@@ -91,19 +118,13 @@ class TemplateAgentContentActionTest extends TestCase
         parent::setUp();
 
         config([
-            "pncservices.ai.timeout" => 600,
+            "pnc.ai.timeout" => 600,
             "concurrency.default" => "fork",
         ]);
 
         $this->transformer = Mockery::mock(TemplateTransformerInterface::class);
-        $this->contentPersistence = Mockery::mock(
-            ContentPersistenceInterface::class,
-        );
 
-        $this->action = new TemplateAgentContentAction(
-            $this->transformer,
-            $this->contentPersistence,
-        );
+        $this->action = new TemplateAgentContentAction($this->transformer);
     }
 
     /**
@@ -127,8 +148,10 @@ class TemplateAgentContentActionTest extends TestCase
     public function execute_runs_tasks_in_parallel_via_concurrency(): void
     {
         $expectedResults = [
-            "track1" => "Success: [track1] saved at [/data/track1].",
-            "track2" => "Success: [track2] saved at [/data/track2].",
+            "blog.com/blog-en" =>
+                "Success: [blog.com/blog-en] saved at [/tmp/agents/abc-123-def/blogcom/blog-en].",
+            "meeting.com/meeting-en" =>
+                "Success: [meeting.com/meeting-en] saved at [/tmp/agents/abc-123-def/meetingcom/meeting-en].",
         ];
 
         $driver = Mockery::mock();
@@ -138,8 +161,8 @@ class TemplateAgentContentActionTest extends TestCase
             ->withArgs(function ($tasks, $timeout): bool {
                 return is_array($tasks) &&
                     count($tasks) === 2 &&
-                    array_key_exists("track1", $tasks) &&
-                    array_key_exists("track2", $tasks) &&
+                    array_key_exists("blog.com/blog-en", $tasks) &&
+                    array_key_exists("meeting.com/meeting-en", $tasks) &&
                     $timeout === 600;
             })
             ->andReturn($expectedResults);
@@ -167,43 +190,52 @@ class TemplateAgentContentActionTest extends TestCase
     {
         config(["concurrency.default" => "sync"]);
 
-        $this->contentPersistence
-            ->shouldReceive("readJson")
+        $this->transformer
+            ->shouldReceive("transform")
             ->once()
-            ->with("/data/track1/content.json")
-            ->andReturn(["field" => "value1"]);
-        $this->contentPersistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with("/data/track2/content.json")
-            ->andReturn(["field" => "value2"]);
+            ->withArgs(function (
+                string $template,
+                array $trackInfo,
+                array $contentData,
+            ): bool {
+                return $template === "blog_post" &&
+                    $trackInfo["domain"] === "blog.com" &&
+                    $trackInfo["type"] === "blog" &&
+                    isset($contentData["blog.com"]);
+            })
+            ->andReturn([
+                "target_directory" => "/tmp/agents/abc-123-def/blogcom/blog-en",
+            ]);
 
         $this->transformer
             ->shouldReceive("transform")
             ->once()
-            ->with("blog_post", Mockery::type("array"), ["field" => "value1"])
+            ->withArgs(function (
+                string $template,
+                array $trackInfo,
+                array $contentData,
+            ): bool {
+                return $template === "social_media" &&
+                    $trackInfo["domain"] === "meeting.com" &&
+                    $trackInfo["type"] === "meeting" &&
+                    isset($contentData["meeting.com"]);
+            })
             ->andReturn([
-                "target_directory" => "/data/track1",
-                "extracted_fields" => ["field" => "value1"],
-                "html_elements" => [],
-            ]);
-        $this->transformer
-            ->shouldReceive("transform")
-            ->once()
-            ->with("social", Mockery::type("array"), ["field" => "value2"])
-            ->andReturn([
-                "target_directory" => "/data/track2",
-                "extracted_fields" => ["field" => "value2"],
-                "html_elements" => [],
+                "target_directory" =>
+                    "/tmp/agents/abc-123-def/meetingcom/meeting-en",
             ]);
 
         $result = $this->action->execute($this->structure);
 
         $this->assertCount(2, $result);
-        $this->assertStringContainsString("track1", $result["track1"]);
-        $this->assertStringContainsString("track2", $result["track2"]);
-        $this->assertStringContainsString("Success", $result["track1"]);
-        $this->assertStringContainsString("Success", $result["track2"]);
+        $this->assertStringContainsString(
+            "Success",
+            $result["blog.com/blog-en"],
+        );
+        $this->assertStringContainsString(
+            "Success",
+            $result["meeting.com/meeting-en"],
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -228,39 +260,30 @@ class TemplateAgentContentActionTest extends TestCase
             ->with("fork")
             ->andReturn($driver);
 
-        $this->contentPersistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with("/data/track1/content.json")
-            ->andReturn(["a" => 1]);
-        $this->contentPersistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with("/data/track2/content.json")
-            ->andReturn(["b" => 2]);
-
         $this->transformer
             ->shouldReceive("transform")
             ->once()
             ->andReturn([
                 "target_directory" => "/out/1",
-                "extracted_fields" => [],
-                "html_elements" => [],
             ]);
         $this->transformer
             ->shouldReceive("transform")
             ->once()
             ->andReturn([
                 "target_directory" => "/out/2",
-                "extracted_fields" => [],
-                "html_elements" => [],
             ]);
 
         $result = $this->action->execute($this->structure);
 
         $this->assertCount(2, $result);
-        $this->assertStringContainsString("Success", $result["track1"]);
-        $this->assertStringContainsString("Success", $result["track2"]);
+        $this->assertStringContainsString(
+            "Success",
+            $result["blog.com/blog-en"],
+        );
+        $this->assertStringContainsString(
+            "Success",
+            $result["meeting.com/meeting-en"],
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -277,26 +300,14 @@ class TemplateAgentContentActionTest extends TestCase
         config(["concurrency.default" => "sync"]);
 
         // track1 succeeds
-        $this->contentPersistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with("/data/track1/content.json")
-            ->andReturn(["ok" => true]);
         $this->transformer
             ->shouldReceive("transform")
             ->once()
             ->andReturn([
                 "target_directory" => "/data/track1",
-                "extracted_fields" => [],
-                "html_elements" => [],
             ]);
 
         // track2 fails
-        $this->contentPersistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with("/data/track2/content.json")
-            ->andReturn(null);
         $this->transformer
             ->shouldReceive("transform")
             ->once()
@@ -306,49 +317,100 @@ class TemplateAgentContentActionTest extends TestCase
 
         $result = $this->action->execute($this->structure);
 
-        $this->assertStringContainsString("Success", $result["track1"]);
-        $this->assertStringContainsString("Error", $result["track2"]);
-        $this->assertStringContainsString("track2", $result["track2"]);
+        $this->assertStringContainsString(
+            "Success",
+            $result["blog.com/blog-en"],
+        );
+        $this->assertStringContainsString(
+            "Error",
+            $result["meeting.com/meeting-en"],
+        );
+        $this->assertStringContainsString(
+            "meeting.com/meeting-en",
+            $result["meeting.com/meeting-en"],
+        );
         $this->assertStringContainsString(
             "Content markdown not found",
-            $result["track2"],
+            $result["meeting.com/meeting-en"],
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Data loading
+    // Transformer arguments
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * execute() should read content JSON via ContentPersistenceInterface
-     * and pass the decoded data to the transformer.
+     * transform() should receive (template, trackInfo, workflow_results)
+     * where workflow_results is the full $structure["workflow_results"] array.
      */
     #[Test]
-    public function execute_reads_content_json_and_passes_to_transformer(): void
+    public function execute_passes_workflow_results_to_transformer(): void
     {
         config(["concurrency.default" => "sync"]);
 
-        $contentData = ["title" => "Test Post", "body" => "Hello"];
-
-        $this->contentPersistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with("/data/track1/content.json")
-            ->andReturn($contentData);
+        $capturedContentData = null;
 
         $this->transformer
             ->shouldReceive("transform")
             ->once()
-            ->with("blog_post", Mockery::type("array"), $contentData)
-            ->andReturn([
-                "target_directory" => "/data/track1",
-                "extracted_fields" => $contentData,
-                "html_elements" => [],
-            ]);
+            ->withArgs(function (
+                string $template,
+                array $trackInfo,
+                array $contentData,
+            ) use (&$capturedContentData): bool {
+                $capturedContentData = $contentData;
+                return true;
+            })
+            ->andReturn(["target_directory" => "/out"]);
+
+        $this->transformer
+            ->shouldReceive("transform")
+            ->once()
+            ->andReturn(["target_directory" => "/out2"]);
 
         $this->action->execute($this->structure);
 
-        $this->assertTrue(true);
+        $this->assertSame(
+            $this->structure["workflow_results"],
+            $capturedContentData,
+        );
+    }
+
+    /**
+     * When "workflow_results" is absent from the structure, transform()
+     * should receive an empty array as the third argument.
+     */
+    #[Test]
+    public function execute_passes_empty_array_when_no_workflow_results(): void
+    {
+        config(["concurrency.default" => "sync"]);
+
+        $structure = $this->structure;
+        unset($structure["workflow_results"]);
+
+        $capturedContentData = null;
+
+        $this->transformer
+            ->shouldReceive("transform")
+            ->once()
+            ->withArgs(function (
+                string $template,
+                array $trackInfo,
+                array $contentData,
+            ) use (&$capturedContentData): bool {
+                $capturedContentData = $contentData;
+                return true;
+            })
+            ->andReturn(["target_directory" => "/out"]);
+
+        $this->transformer
+            ->shouldReceive("transform")
+            ->once()
+            ->andReturn(["target_directory" => "/out2"]);
+
+        $this->action->execute($structure);
+
+        $this->assertSame([], $capturedContentData);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -357,12 +419,12 @@ class TemplateAgentContentActionTest extends TestCase
 
     /**
      * The timeout passed to Concurrency should be read from the
-     * pncservices.ai.timeout config key.
+     * pnc.ai.timeout config key.
      */
     #[Test]
     public function execute_uses_configured_timeout_for_concurrency(): void
     {
-        config(["pncservices.ai.timeout" => 120]);
+        config(["pnc.ai.timeout" => 120]);
 
         $driver = Mockery::mock();
         $driver
@@ -379,7 +441,33 @@ class TemplateAgentContentActionTest extends TestCase
             ->andReturn($driver);
 
         $this->action->execute($this->structure);
+    }
 
-        $this->assertTrue(true);
+    /**
+     * When pnc.ai.timeout is not configured, the default of 600 should be used.
+     */
+    #[Test]
+    public function execute_uses_default_timeout_when_not_configured(): void
+    {
+        // Remove the key entirely so config() falls back to the default.
+        $config = config("pnc");
+        unset($config["ai"]["timeout"]);
+        config()->set("pnc", $config);
+
+        $driver = Mockery::mock();
+        $driver
+            ->shouldReceive("run")
+            ->once()
+            ->withArgs(function ($tasks, $timeout): bool {
+                return $timeout === 600;
+            })
+            ->andReturn([]);
+
+        Concurrency::shouldReceive("driver")
+            ->once()
+            ->with("fork")
+            ->andReturn($driver);
+
+        $this->action->execute($this->structure);
     }
 }

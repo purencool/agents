@@ -23,8 +23,6 @@ use App\PncTemplates\Services\TemplateTransformerService;
  *    in the application container (non-singleton).
  *
  * boot():
- *  - Merges the package's config/templates.php into the application
- *    config under the "templates" key, if the file exists.
  */
 class PncTemplatesServiceProvider extends ServiceProvider
 {

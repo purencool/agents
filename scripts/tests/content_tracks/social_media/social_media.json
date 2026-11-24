@@ -4,18 +4,18 @@
   "categories" : "AI, LLM's, Local Models",
   "domains":{
     "example.com": {
-        "typeone":   {"context": "This for marketing", "content_tracks": { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en, ru"} } },
-        "typetwo":   {"context": "This for developer", "content_tracks":  { "config": {"type": "social", "workflow":"default",  "template":"social", "track": "social_media", "lang": "en"} } },
-        "typethree": {"context": "This for sales", "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+        "typeone":   {"context": "This for marketing", "content_tracks": { "config": {"type": "social", "workflow":"social_media", "template":"social", "track": "social_media", "lang": "en, ru"} } },
+        "typetwo":   {"context": "This for developer", "content_tracks":  { "config": {"type": "blog_post", "workflow":"blog_post",  "template":"blog_post", "track": "blog_post", "lang": "en"} } },
+        "typethree": {"context": "This for sales", "content_tracks":  { "config": {"type": "blog_post", "workflow":"blog_post", "template":"blog_post", "track": "blog_post", "lang": "en"} } }
       },
     "house.au": {
-        "sales":  { "context": "This for marketing","content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+        "sales":  { "context": "This for marketing","content_tracks":  { "config": {"type": "blog_post", "workflow":"blog_post", "template":"blog_post", "track": "blog_post", "lang": "en"} } }
     },
     "blog.com": {
-        "blog": {"context": "This for marketing", "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+        "blog": {"context": "This for marketing", "content_tracks":  { "config": {"type": "social", "workflow":"social_media", "template":"social", "track": "blog_post", "lang": "en"} } }
     },
     "meeting.com": {
-        "meeting": {"context": "This for marketing", "content_tracks":  { "config": {"type": "social", "workflow":"default", "template":"social", "track": "social_media", "lang": "en"} } }
+        "meeting": {"context": "This for marketing", "content_tracks":  { "config": {"type": "blog_post", "workflow":"blog_post", "template":"blog_post", "track": "blog_post", "lang": "en"} } }
     }
   }
 }

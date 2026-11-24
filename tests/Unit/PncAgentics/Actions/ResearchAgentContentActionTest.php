@@ -11,19 +11,19 @@ declare(strict_types=1);
 
 namespace Tests\Unit\PncAgentics\Actions;
 
-use App\PncAgentics\Workflows\ResearchGatherer;
 use App\PncAgentics\Actions\ResearchAgentContentAction;
-use Illuminate\Support\Facades\Log;
+use App\PncAgentics\Workflows\ResearchGatherer;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
  * Unit tests for {@see ResearchAgentContentAction}.
  *
- * Verifies that the gatherer is called once per track with the correct
- * payload (title + domain) and research_dir, that results are stored
- * in the structure, and that an exception is thrown when research_dir
- * is missing.
+ * Verifies that:
+ *  - gather() is called exactly once with the full structure array.
+ *  - The gatherer's return value is passed through as the method return.
+ *  - research.json is written to research_dir with uuid and data.
+ *  - A RuntimeException is thrown when research_dir is missing.
  *
  * @covers \App\PncAgentics\Actions\ResearchAgentContentAction
  */
@@ -33,6 +33,8 @@ class ResearchAgentContentActionTest extends TestCase
 
     private ResearchAgentContentAction $action;
 
+    private string $tempDir;
+
     /**
      * Mock structure matching CreateAgentStructureAction's documented return shape.
      *
@@ -40,192 +42,209 @@ class ResearchAgentContentActionTest extends TestCase
      *     uuid: string,
      *     title: string,
      *     title_slug: string,
+     *     description: string,
+     *     categories: string[],
      *     domain_dir: string,
      *     assets_dir: string,
      *     research_dir: string,
-     *     tracks: array<string, array{
+     *     tracks: array<string, array<string, array{
+     *         uuid: string,
+     *         title: string,
+     *         categories: string[],
+     *         workflow: string,
+     *         lang: string,
      *         domain: string,
+     *         context: string,
      *         type: string,
      *         template: string,
      *         track: string,
      *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
      *         content_json: string,
-     *         content_md: string,
-     *         description_md: string
-     *     }>
+     *         content_path_json: string,
+     *         content_html: string,
+     *         content_path_html: string,
+     *         content_markdown: string,
+     *         content_path_markdown: string,
+     *         content_description: string
+     *     }>>
      * }
      */
-    private array $structure = [
-        "uuid" => "abc-123-def",
-        "title" => "Can AI models be deployed on-premises?",
-        "title_slug" => "can_ai_models_be_deployed_on_premises",
-        "domain_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000",
-        "assets_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000/assets",
-        "research_dir" => "/tmp/research/abc-123-def/2026_11_10_120000",
-        "tracks" => [
-            "blog.com/blog/en" => [
-                "domain" => "blog.com",
-                "type" => "blog",
-                "template" => "social",
-                "track" => "social_media",
-                "track_type" => "social",
-                "workflow" => "default",
-                "lang" => "en",
-                "content_json" =>
-                    "/tmp/agents/abc-123-def/blogcom-test-blog-en-content.json",
-                "content_md" =>
-                    "/tmp/agents/abc-123-def/blogcom-test-blog-en-content.md",
-                "description_md" =>
-                    "/tmp/agents/abc-123-def/blogcom-test-blog-en-description.md",
-            ],
-            "meeting.com/meeting/en" => [
-                "domain" => "meeting.com",
-                "type" => "meeting",
-                "template" => "social",
-                "track" => "social_media",
-                "track_type" => "social",
-                "workflow" => "default",
-                "lang" => "en",
-                "content_json" =>
-                    "/tmp/agents/abc-123-def/meetingcom-test-meeting-en-content.json",
-                "content_md" =>
-                    "/tmp/agents/abc-123-def/meetingcom-test-meeting-en-content.md",
-                "description_md" =>
-                    "/tmp/agents/abc-123-def/meetingcom-test-meeting-en-description.md",
-            ],
-        ],
-    ];
+    private array $structure;
 
     /**
-     * Sets up mocks and the action under test.
+     * Sets up a temp directory, builds the structure fixture, and mocks the gatherer.
      */
     protected function setUp(): void
     {
         parent::setUp();
 
+        $this->tempDir = sys_get_temp_dir() . "/research_test_" . uniqid();
+        mkdir("{$this->tempDir}/research", 0755, true);
+        mkdir("{$this->tempDir}/assets", 0755, true);
+
+        $this->structure = [
+            "uuid" => "abc-123-def",
+            "title" => "Can AI models be deployed on-premises?",
+            "title_slug" => "can_ai_models_be_deployed_on_premises",
+            "description" => "Test description for research gathering",
+            "categories" => ["AI", "LLMs", "Local Models"],
+            "domain_dir" => $this->tempDir,
+            "assets_dir" => "{$this->tempDir}/assets",
+            "research_dir" => "{$this->tempDir}/research",
+            "tracks" => [
+                "blog.com" => [
+                    "blog-en" => [
+                        "uuid" => "abc-123-def",
+                        "title" => "Can AI models be deployed on-premises?",
+                        "categories" => ["AI", "LLMs", "Local Models"],
+                        "workflow" => "default",
+                        "lang" => "en",
+                        "domain" => "blog.com",
+                        "context" => "This for marketing",
+                        "type" => "blog",
+                        "template" => "social",
+                        "track" => "social_media",
+                        "track_type" => "social",
+                        "content_json" => "",
+                        "content_path_json" => "{$this->tempDir}/blogcom/blog-en/blogcom-can_ai_models_be_deployed_on_premises-blog-en-content.json",
+                        "content_html" => "",
+                        "content_path_html" => "",
+                        "content_markdown" => "",
+                        "content_path_markdown" => "{$this->tempDir}/blogcom/blog-en/blogcom-can_ai_models_be_deployed_on_premises-blog-en-content.md",
+                        "content_description" => "{$this->tempDir}/blogcom/blog-en/blogcom-can_ai_models_be_deployed_on_premises-blog-en-description.md",
+                    ],
+                ],
+                "meeting.com" => [
+                    "meeting-en" => [
+                        "uuid" => "abc-123-def",
+                        "title" => "Can AI models be deployed on-premises?",
+                        "categories" => ["AI", "LLMs", "Local Models"],
+                        "workflow" => "default",
+                        "lang" => "en",
+                        "domain" => "meeting.com",
+                        "context" => "This for security",
+                        "type" => "meeting",
+                        "template" => "social",
+                        "track" => "social_media",
+                        "track_type" => "social",
+                        "content_json" => "",
+                        "content_path_json" => "{$this->tempDir}/meetingcom/meeting-en/meetingcom-can_ai_models_be_deployed_on_premises-meeting-en-content.json",
+                        "content_html" => "",
+                        "content_path_html" => "",
+                        "content_markdown" => "",
+                        "content_path_markdown" => "{$this->tempDir}/meetingcom/meeting-en/meetingcom-can_ai_models_be_deployed_on_premises-meeting-en-content.md",
+                        "content_description" => "{$this->tempDir}/meetingcom/meeting-en/meetingcom-can_ai_models_be_deployed_on_premises-meeting-en-description.md",
+                    ],
+                ],
+            ],
+        ];
+
         $this->gatherer = \Mockery::mock(ResearchGatherer::class);
         $this->action = new ResearchAgentContentAction($this->gatherer);
-
-        Log::shouldReceive("channel")
-            ->with("daily")
-            ->andReturn(
-                \Mockery::mock()->shouldReceive("info")->byDefault()->mock(),
-            );
     }
 
     /**
-     * Closes Mockery after each test.
+     * Closes Mockery and cleans up the temp directory after each test.
      */
     protected function tearDown(): void
     {
         \Mockery::close();
+        $this->removeDirectory($this->tempDir);
         parent::tearDown();
     }
 
+    // ─── Gatherer invocation ─────────────────────────────────────────────
+
     /**
-     * Verifies the gatherer is called once per track with the correct
-     * payload (title + domain) and the research_dir as target directory.
+     * Verifies gather() is called exactly once with the full structure array.
      */
     #[Test]
-    public function execute_calls_gatherer_once_per_track_with_correct_args(): void
+    public function execute_calls_gatherer_once_with_full_structure(): void
     {
         $this->gatherer
             ->shouldReceive("gather")
-            ->twice()
-            ->withArgs(function (array $payload, string $dir) {
-                return $dir === $this->structure["research_dir"] &&
-                    $payload["title"] === $this->structure["title"] &&
-                    isset($payload["domain"]);
+            ->once()
+            ->withArgs(function (array $structure): bool {
+                return $structure["uuid"] === $this->structure["uuid"] &&
+                    $structure["title"] === $this->structure["title"] &&
+                    $structure["research_dir"] ===
+                        $this->structure["research_dir"] &&
+                    isset($structure["tracks"]);
             })
-            ->andReturn("research text");
+            ->andReturn(["findings" => "AI is effective"]);
 
-        $result = $this->action->execute($this->structure);
-
-        $this->assertCount(2, $result["tracks"]);
+        $this->action->execute($this->structure);
     }
 
     /**
-     * Verifies the correct domain is passed in the payload for each track.
+     * Verifies the gatherer receives the exact structure array unchanged.
      */
     #[Test]
-    public function execute_passes_correct_domain_per_track(): void
+    public function execute_passes_structure_unchanged_to_gatherer(): void
     {
-        $capturedDomains = [];
+        $captured = null;
 
         $this->gatherer
             ->shouldReceive("gather")
-            ->twice()
-            ->withArgs(function (array $payload, string $dir) use (
-                &$capturedDomains,
-            ) {
-                $capturedDomains[] = $payload["domain"];
+            ->once()
+            ->withArgs(function (array $structure) use (&$captured): bool {
+                $captured = $structure;
                 return true;
             })
-            ->andReturn("text");
+            ->andReturn([]);
 
         $this->action->execute($this->structure);
 
-        $this->assertSame(["blog.com", "meeting.com"], $capturedDomains);
+        $this->assertSame($this->structure, $captured);
     }
 
+    // ─── Return value ────────────────────────────────────────────────────
+
     /**
-     * Verifies the research text returned by the gatherer is stored
-     * under "research_text" in each track.
+     * Verifies the return value is exactly what gather() returns.
      */
     #[Test]
-    public function execute_stores_research_text_in_each_track(): void
+    public function execute_returns_gatherer_result_directly(): void
     {
+        $expected = ["key" => "value", "items" => [1, 2, 3]];
+
+        $this->gatherer->shouldReceive("gather")->once()->andReturn($expected);
+
+        $result = $this->action->execute($this->structure);
+
+        $this->assertSame($expected, $result);
+    }
+
+    // ─── research.json persistence ───────────────────────────────────────
+
+    /**
+     * Verifies research.json is written to research_dir with the correct shape:
+     * [0] => {"uuid": "..."}, [1] => {"data": <gatherer result>}
+     */
+    #[Test]
+    public function execute_writes_research_json_to_research_dir(): void
+    {
+        $gathererResult = ["findings" => "AI is effective on-premises"];
+
         $this->gatherer
             ->shouldReceive("gather")
-            ->twice()
-            ->andReturn("combined research data");
+            ->once()
+            ->andReturn($gathererResult);
 
-        $result = $this->action->execute($this->structure);
+        $this->action->execute($this->structure);
 
-        foreach ($result["tracks"] as $key => $track) {
-            $this->assertArrayHasKey(
-                "research_text",
-                $track,
-                "Missing research_text for {$key}",
-            );
-            $this->assertSame(
-                "combined research data",
-                $track["research_text"],
-            );
-        }
+        $researchPath = "{$this->structure["research_dir"]}/research.json";
+        $this->assertFileExists($researchPath);
+
+        $data = json_decode((string) file_get_contents($researchPath), true);
+
+        $this->assertIsArray($data);
+        $this->assertCount(2, $data);
+        $this->assertSame($this->structure["uuid"], $data[0]["uuid"]);
+        $this->assertSame($gathererResult, $data[1]["data"]);
     }
 
-    /**
-     * Verifies the original structure keys are preserved in the return value.
-     */
-    #[Test]
-    public function execute_preserves_original_structure_keys(): void
-    {
-        $this->gatherer->shouldReceive("gather")->twice()->andReturn("text");
-
-        $result = $this->action->execute($this->structure);
-
-        $this->assertSame($this->structure["uuid"], $result["uuid"]);
-        $this->assertSame($this->structure["title"], $result["title"]);
-        $this->assertSame(
-            $this->structure["title_slug"],
-            $result["title_slug"],
-        );
-        $this->assertSame(
-            $this->structure["domain_dir"],
-            $result["domain_dir"],
-        );
-        $this->assertSame(
-            $this->structure["assets_dir"],
-            $result["assets_dir"],
-        );
-        $this->assertSame(
-            $this->structure["research_dir"],
-            $result["research_dir"],
-        );
-    }
+    // ─── Error handling ──────────────────────────────────────────────────
 
     /**
      * Verifies a RuntimeException is thrown when "research_dir" is missing.
@@ -236,9 +255,57 @@ class ResearchAgentContentActionTest extends TestCase
         $structure = $this->structure;
         unset($structure["research_dir"]);
 
+        $this->gatherer->shouldReceive("gather")->never();
+
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage("missing 'research_dir'");
 
         $this->action->execute($structure);
+    }
+
+    /**
+     * Verifies gather() is NOT called when research_dir is missing.
+     */
+    #[Test]
+    public function execute_does_not_call_gatherer_when_research_dir_missing(): void
+    {
+        $structure = $this->structure;
+        unset($structure["research_dir"]);
+
+        $this->gatherer->shouldReceive("gather")->never();
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->action->execute($structure);
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────
+
+    /**
+     * Recursively deletes a directory tree.
+     *
+     * @param string $dir Absolute path to remove.
+     */
+    private function removeDirectory(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $dir,
+                \FilesystemIterator::SKIP_DOTS,
+            ),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+
+        foreach ($iterator as $item) {
+            $item->isDir()
+                ? rmdir($item->getPathname())
+                : unlink($item->getPathname());
+        }
+
+        rmdir($dir);
     }
 }

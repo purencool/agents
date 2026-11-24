@@ -41,7 +41,9 @@ class ResearchGatherer
     public function __construct(
         private readonly McpToolServiceInterface $mcp,
         private readonly ContentPersistenceInterface $persistence,
-    ) {}
+    ) {
+        //
+    }
 
     /**
      * Gathers research data using MCP tools.

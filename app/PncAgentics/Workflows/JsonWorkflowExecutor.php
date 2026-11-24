@@ -14,19 +14,23 @@ namespace App\PncAgentics\Workflows;
 use App\PncAgentics\Contracts\LoopStageExecutorContractInterface;
 use App\PncAgentics\Contracts\LoopStageResolverContractInterface;
 use App\PncAgentics\Contracts\SkillExecutorInterface;
+use RuntimeException;
 
 /**
- * Data-driven workflow executor.
+ * Data-driven workflow executor for multi-track content pipelines.
  *
- * Orchestrates the execution of a JSON workflow definition by:
- *  - Loading the definition via {@see WorkflowDefinitionLoader}
- *    (override dir → default dir, with fallback to "default.json").
- *  - Dispatching linear stages directly (skill call → transform → store in context).
- *  - Dispatching loop stages via {@see LoopStageExecutor}
- *    (iteration, per-iteration reset, sub-stage execution, accumulation).
+ * Orchestrates execution of a JSON workflow definition across ALL tracks
+ * in a content structure. For each track (domain → type-lang), it:
  *
- * Output persistence is handled externally (by the template/transformer
- * layer) — this class returns the result and does not write to disk.
+ *  1. Builds a flat context from the shared structure + per-track fields.
+ *  2. Loads the workflow definition via {@see WorkflowDefinitionLoader}.
+ *  3. Iterates stages in order:
+ *     - Loop stages (`type === "loop"`) → delegated to {@see LoopStageExecutor}.
+ *     - Linear stages → executed via {@see self::executeStage()}.
+ *  4. Extracts the final output and persists it to the track's content files.
+ *
+ * The original `$structure` array is returned with a `workflow_results`
+ * key added — individual track entries are not mutated in-place.
  *
  * This class implements the contracts required by {@see LoopStageExecutor}:
  *  - {@see LoopStageExecutorContractInterface} — provides executeStage().
@@ -56,8 +60,10 @@ use App\PncAgentics\Contracts\SkillExecutorInterface;
  *
  * @example
  *   $executor = app(JsonWorkflowExecutor::class);
- *   $result = $executor->execute($structure);
- *   $output = $result["workflow_results"];
+ *   $result   = $executor->execute($structure);
+ *   $output   = $result["workflow_results"]["example.com"]["typeone-en"];
+ *
+ * @see \App\PncAgentics\Actions\CreateAgentStructureAction
  */
 class JsonWorkflowExecutor implements
     LoopStageExecutorContractInterface,
@@ -65,22 +71,26 @@ class JsonWorkflowExecutor implements
 {
     /**
      * Resolves and loads workflow definition JSON files from disk.
+     *
+     * Searches override dir first, then default dir, with fallback to
+     * "default.json" when no named file exists.
      */
     protected WorkflowDefinitionLoader $loader;
 
     /**
-     * Executes loop stages (iteration, reset, sub-stage dispatch, accumulation).
-     * Receives $this as both the stage executor and the resolver.
+     * Executes loop stages (iteration, per-iteration reset, sub-stage
+     * dispatch, accumulation). Receives $this as both the stage executor
+     * and the template resolver.
      */
     protected LoopStageExecutor $loopExecutor;
 
     /**
-     * Resolves {{key}} placeholders from context arrays.
+     * Resolves {{key}} placeholders from flat context arrays.
      */
     protected TemplateResolver $resolver;
 
     /**
-     * Applies named output transforms (strip_code_fence, json_decode).
+     * Applies named output transforms (strip_code_fence, json_decode, etc.).
      */
     protected StageTransform $transform;
 
@@ -96,52 +106,97 @@ class JsonWorkflowExecutor implements
     }
 
     /**
-     * Execute a workflow by name.
+     * Execute workflows for ALL tracks in the structure.
      *
-     * Execution flow:
-     *  1. Build a flat context from the structure.
+     * Iterates the two-level tracks array (domain → type-lang), runs the
+     * workflow definition per track, persists output to disk, and attaches
+     * a `workflow_results` key to the returned structure.
+     *
+     * Execution flow per track:
+     *  1. Build a flat context via {@see self::buildContext()}.
      *  2. Load the workflow definition (delegated to WorkflowDefinitionLoader).
-     *  3. Iterate through each stage in order:
-     *     - Loop stages (type === "loop") → delegated to LoopStageExecutor.
-     *     - Linear stages → executed via executeStage().
-     *  4. Extract the final output and attach it to the structure.
+     *  3. Iterate stages in order:
+     *     - Loop stages → {@see LoopStageExecutor::execute()}.
+     *     - Linear stages → {@see self::executeStage()}.
+     *  4. Extract the final output from the last stage's output_key.
+     *  5. Persist via {@see self::persistTrackOutput()}.
      *
-     * The original $structure is never mutated by stage execution —
-     * a separate context array is used for the workflow's working state.
+     * @param array{
+     *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
+     *     description: string,
+     *     categories: string[],
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string,
+     *     tracks: array<string, array<string, array{
+     *         uuid: string,
+     *         title: string,
+     *         categories: string[],
+     *         workflow: string,
+     *         lang: string,
+     *         domain: string,
+     *         context: string,
+     *         type: string,
+     *         template: string,
+     *         track: string,
+     *         track_type: string,
+     *         content_json: string,
+     *         content_path_json: string,
+     *         content_html: string,
+     *         content_path_html: string,
+     *         content_markdown: string,
+     *         content_path_markdown: string,
+     *         content_description: string
+     *     }>>
+     * } $structure The full content structure from CreateAgentStructureAction.
      *
-     * @param array $structure The full content structure from upstream actions.
+     * @return array The same structure with "workflow_results" added:
+     *               array<string, array<string, mixed>> keyed by domain → trackKey.
      *
-     * @return array The same structure with "workflow_results" added.
-     *
-     * @throws \RuntimeException When the workflow definition file is not found or contains invalid JSON.
+     * @throws RuntimeException When a workflow definition file is not found
+     *                          or contains invalid JSON.
      */
     public function execute(array $structure): array
     {
-        $context = $this->buildContext($structure);
+        $results = [];
 
-        $definition = $this->loader->load($context["workflow"]);
+        foreach ($structure["tracks"] as $domain => $domainTracks) {
+            foreach ($domainTracks as $trackKey => $track) {
+                $context = $this->buildContext($structure, $track);
 
-        foreach ($definition["stages"] as $stage) {
-            if (isset($stage["type"]) && $stage["type"] === "loop") {
-                $this->loopExecutor->execute($stage, $context);
-            } else {
-                $this->executeStage($stage, $context);
+                $definition = $this->loader->load($context["workflow"]);
+                foreach ($definition["stages"] as $stage) {
+                    if (isset($stage["type"]) && $stage["type"] === "loop") {
+                        $this->loopExecutor->execute($stage, $context);
+                    } else {
+                        $this->executeStage($stage, $context);
+                    }
+                }
+
+                $lastStage =
+                    $definition["stages"][count($definition["stages"]) - 1];
+                $outputKey =
+                    $lastStage["output_key"] ??
+                    ($lastStage["accumulate"]["key"] ?? null);
+
+                $raw = $outputKey !== null ? $context[$outputKey] ?? "" : "";
+
+                if (is_string($raw)) {
+                    $decoded = json_decode($raw, true);
+                    $raw = is_array($decoded) ? $decoded : ["text" => $raw];
+                }
+
+                $results[$domain][$trackKey] = $raw;
+
+                $this->persistTrackOutput($track, $raw, $context);
             }
         }
 
-        $lastStage = $definition["stages"][count($definition["stages"]) - 1];
-        $outputKey =
-            $lastStage["output_key"] ??
-            ($lastStage["accumulate"]["key"] ?? null);
+        $structure["workflow_results"] = $results;
 
-        $raw = $outputKey !== null ? $context[$outputKey] ?? "" : "";
-
-        if (is_string($raw)) {
-            $decoded = json_decode($raw, true);
-            $raw = is_array($decoded) ? $decoded : ["text" => $raw];
-        }
-
-        return $raw;
+        return $structure;
     }
 
     /**
@@ -157,8 +212,14 @@ class JsonWorkflowExecutor implements
      *
      * Satisfies {@see LoopStageExecutorContractInterface::executeStage()}.
      *
-     * @param array $stage   Stage definition from the workflow JSON.
-     * @param array $context Mutable context (modified in-place).
+     * @param array{
+     *     skill: string,
+     *     variables?: array<string, string>,
+     *     options?: array<string, mixed>,
+     *     output_key: string,
+     *     transform?: string
+     * } $stage   Stage definition from the workflow JSON.
+     * @param array<string, mixed> $context Mutable context (modified in-place).
      */
     public function executeStage(array $stage, array &$context): void
     {
@@ -187,9 +248,9 @@ class JsonWorkflowExecutor implements
      * Satisfies {@see LoopStageResolverContractInterface::resolveVariable()}.
      *
      * @param string $key     Template string with {{key}} placeholders.
-     * @param array  $context Current context.
+     * @param array  $context Current flat context.
      *
-     * @return mixed The resolved value.
+     * @return mixed The resolved value (string, int, array, etc.).
      */
     public function resolveVariable(string $key, array $context): mixed
     {
@@ -202,9 +263,9 @@ class JsonWorkflowExecutor implements
      * Satisfies {@see LoopStageResolverContractInterface::resolveTemplate()}.
      *
      * @param string $template Template string.
-     * @param array  $context  Current context.
+     * @param array  $context  Current flat context.
      *
-     * @return string The resolved template.
+     * @return string The resolved template with all placeholders replaced.
      */
     public function resolveTemplate(string $template, array $context): string
     {
@@ -212,37 +273,108 @@ class JsonWorkflowExecutor implements
     }
 
     /**
-     * Build a flat context array from the structure for workflow template resolution.
+     * Build a flat context array for ONE track from the shared structure.
      *
-     * The original $structure is never mutated — stage outputs are stored
-     * in this separate array.
+     * Merges top-level structure fields (title, uuid, dirs) with per-track
+     * fields (domain, context, type, template, workflow, lang, paths) into
+     * a single flat array suitable for {{key}} template resolution.
      *
-     * @param array<string, mixed> $structure The full content structure.
+     * The original $structure is never mutated — this returns a new array.
+     *
+     * @param array{
+     *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
+     *     description: string,
+     *     categories: string[],
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string
+     * } $structure The top-level structure.
+     * @param array{
+     *     domain: string,
+     *     context: string,
+     *     type: string,
+     *     template: string,
+     *     track: string,
+     *     track_type: string,
+     *     workflow: string,
+     *     lang: string,
+     *     content_path_json: string,
+     *     content_path_markdown: string,
+     *     content_description: string
+     * } $track A single track entry from tracks[domain][type-lang].
      *
      * @return array<string, mixed> Flat context for stage execution.
      */
-    protected function buildContext(array $structure): array
+    protected function buildContext(array $structure, array $track): array
     {
-        $track = $structure["tracks"];
-
         return [
+            "uuid" => $structure["uuid"],
             "title" => $structure["title"],
             "title_slug" => $structure["title_slug"],
-            "uuid" => $structure["uuid"],
+            "description" => $structure["description"],
+            "categories" => $structure["categories"],
             "domain_dir" => $structure["domain_dir"],
             "assets_dir" => $structure["assets_dir"],
             "research_dir" => $structure["research_dir"],
-            "research_text" => $track["research_text"] ?? "",
             "domain" => $track["domain"],
+            "context" => $track["context"],
             "type" => $track["type"],
             "template" => $track["template"],
             "track" => $track["track"],
             "track_type" => $track["track_type"],
             "workflow" => $track["workflow"],
             "lang" => $track["lang"],
-            "content_json" => $track["content_json"],
-            "content_md" => $track["content_md"],
-            "description_md" => $track["description_md"],
+            "content_path_json" => $track["content_path_json"],
+            "content_path_markdown" => $track["content_path_markdown"],
+            "content_description" => $track["content_description"],
         ];
+    }
+
+    /**
+     * Write the workflow output back to the track's content files on disk.
+     *
+     * Updates two files (when their paths are non-empty):
+     *  - content_path_json     — merges the result into the existing JSON under "content".
+     *  - content_path_markdown — overwrites with the text representation of the result.
+     *
+     * If $raw is an array, the markdown file receives the "text" key if present,
+     * otherwise a JSON-encoded fallback.
+     *
+     * @param array{
+     *     content_path_json: string,
+     *     content_path_markdown: string
+     * } $track The track entry (only path fields are used).
+     * @param mixed $raw   The final workflow output (string or array).
+     * @param array $context The flat context (available for future use).
+     */
+    protected function persistTrackOutput(
+        array $track,
+        mixed $raw,
+        array $context,
+    ): void {
+        if (
+            !empty($track["content_path_json"]) &&
+            file_exists($track["content_path_json"])
+        ) {
+            $data =
+                json_decode(
+                    (string) file_get_contents($track["content_path_json"]),
+                    true,
+                ) ?? [];
+            $data["content"] = $raw;
+            file_put_contents(
+                $track["content_path_json"],
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+            );
+        }
+
+        if (!empty($track["content_path_markdown"])) {
+            $text = is_array($raw)
+                ? $raw["text"] ?? json_encode($raw)
+                : (string) $raw;
+            file_put_contents($track["content_path_markdown"], $text);
+        }
     }
 }

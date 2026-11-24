@@ -21,22 +21,51 @@ use PHPUnit\Framework\TestCase;
  * Unit tests for {@see WorkFlowAgentContentAction}.
  *
  * Verifies that:
- *  - The correct workflow name is resolved from the first track's "workflow" field.
- *  - The context is built from the structure and passed to the executor.
- *  - The executor's string output is stored in the structure's "content" key.
- *  - All original structure keys are preserved.
+ *  - The full structure array is passed unchanged to JsonWorkflowExecutor::execute().
+ *  - The executor's return value is returned directly (no mutation, no wrapping).
+ *  - The executor is called exactly once regardless of track count.
  *
  * @covers \App\PncAgentics\Actions\WorkFlowAgentContentAction
  */
 class WorkFlowAgentContentActionTest extends TestCase
 {
     private JsonWorkflowExecutor $executor;
+
     private WorkFlowAgentContentAction $action;
 
     /**
-     * A representative content structure with two tracks.
+     * A representative content structure matching CreateAgentStructureAction's return shape.
      *
-     * @var array<string, mixed>
+     * @var array{
+     *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
+     *     description: string,
+     *     categories: string[],
+     *     domain_dir: string,
+     *     assets_dir: string,
+     *     research_dir: string,
+     *     tracks: array<string, array<string, array{
+     *         uuid: string,
+     *         title: string,
+     *         categories: string[],
+     *         workflow: string,
+     *         lang: string,
+     *         domain: string,
+     *         context: string,
+     *         type: string,
+     *         template: string,
+     *         track: string,
+     *         track_type: string,
+     *         content_json: string,
+     *         content_path_json: string,
+     *         content_html: string,
+     *         content_path_html: string,
+     *         content_markdown: string,
+     *         content_path_markdown: string,
+     *         content_description: string
+     *     }>>
+     * }
      */
     private array $structure;
 
@@ -47,25 +76,64 @@ class WorkFlowAgentContentActionTest extends TestCase
 
         $this->structure = [
             "uuid" => "abc-123-def",
+            "title" => "Can AI models be deployed on-premises?",
+            "title_slug" => "can_ai_models_be_deployed_on_premises",
+            "description" => "Test description",
+            "categories" => ["AI", "LLMs", "Local Models"],
             "domain_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000",
             "assets_dir" => "/tmp/agents/abc-123-def/2026_11_10_120000/assets",
-            "research_dir" => "/tmp/research/abc-123-def/2026_11_10_120000",
-            "title" => "Can AI models be deployed on-premises?",
-            "title_slug" => "can-ai-models-be-deployed-on-premises",
+            "research_dir" =>
+                "/tmp/agents/abc-123-def/2026_11_10_120000/research",
             "tracks" => [
-                "blog.com/blog/en" => [
-                    "domain" => "blog.com",
-                    "type" => "blog",
-                    "workflow" => "default",
-                    "lang" => "en",
-                    "research_text" => "Research about AI deployment.",
+                "blog.com" => [
+                    "blog-en" => [
+                        "uuid" => "abc-123-def",
+                        "title" => "Can AI models be deployed on-premises?",
+                        "categories" => ["AI", "LLMs", "Local Models"],
+                        "workflow" => "default",
+                        "lang" => "en",
+                        "domain" => "blog.com",
+                        "context" => "This for marketing",
+                        "type" => "blog",
+                        "template" => "social",
+                        "track" => "social_media",
+                        "track_type" => "social",
+                        "content_json" => "",
+                        "content_path_json" =>
+                            "/tmp/agents/abc-123-def/blogcom/blog-en/blogcom-test-blog-en-content.json",
+                        "content_html" => "",
+                        "content_path_html" => "",
+                        "content_markdown" => "",
+                        "content_path_markdown" =>
+                            "/tmp/agents/abc-123-def/blogcom/blog-en/blogcom-test-blog-en-content.md",
+                        "content_description" =>
+                            "/tmp/agents/abc-123-def/blogcom/blog-en/blogcom-test-blog-en-description.md",
+                    ],
                 ],
-                "meeting.com/meeting/en" => [
-                    "domain" => "meeting.com",
-                    "type" => "meeting",
-                    "workflow" => "default",
-                    "lang" => "en",
-                    "research_text" => "Research about AI in meetings.",
+                "meeting.com" => [
+                    "meeting-en" => [
+                        "uuid" => "abc-123-def",
+                        "title" => "Can AI models be deployed on-premises?",
+                        "categories" => ["AI", "LLMs", "Local Models"],
+                        "workflow" => "default",
+                        "lang" => "en",
+                        "domain" => "meeting.com",
+                        "context" => "This for security",
+                        "type" => "meeting",
+                        "template" => "social",
+                        "track" => "social_media",
+                        "track_type" => "social",
+                        "content_json" => "",
+                        "content_path_json" =>
+                            "/tmp/agents/abc-123-def/meetingcom/meeting-en/meetingcom-test-meeting-en-content.json",
+                        "content_html" => "",
+                        "content_path_html" => "",
+                        "content_markdown" => "",
+                        "content_path_markdown" =>
+                            "/tmp/agents/abc-123-def/meetingcom/meeting-en/meetingcom-test-meeting-en-content.md",
+                        "content_description" =>
+                            "/tmp/agents/abc-123-def/meetingcom/meeting-en/meetingcom-test-meeting-en-description.md",
+                    ],
                 ],
             ],
         ];
@@ -76,170 +144,55 @@ class WorkFlowAgentContentActionTest extends TestCase
         Mockery::close();
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Workflow resolution
-    // ─────────────────────────────────────────────────────────────────────
+    // ─── Pass-through behaviour ──────────────────────────────────────────
 
     /**
-     * A "default" workflow field should resolve to "universal_documentation".
+     * The full structure array is passed unchanged to executor::execute().
      */
     #[Test]
-    public function execute_resolves_default_workflow_to_universal_documentation(): void
+    public function execute_passes_full_structure_to_executor(): void
     {
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("universal_documentation", Mockery::type("array"))
-            ->andReturn("Generated output");
-
-        $result = $this->action->execute($this->structure);
-
-        $this->assertSame("Generated output", $result["content"]);
-    }
-
-    /**
-     * A "social_media" workflow field should resolve to "social_media".
-     */
-    #[Test]
-    public function execute_resolves_social_media_workflow(): void
-    {
-        $structure = $this->structure;
-        $structure["tracks"]["blog.com/blog/en"]["workflow"] = "social_media";
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with("social_media", Mockery::type("array"))
-            ->andReturn("Social output");
-
-        $result = $this->action->execute($structure);
-
-        $this->assertSame("Social output", $result["content"]);
-    }
-
-    /**
-     * An empty workflow field should fall back to "universal_documentation".
-     */
-    #[Test]
-    public function execute_resolves_empty_workflow_to_universal_documentation(): void
-    {
-        $structure = $this->structure;
-        $structure["tracks"]["blog.com/blog/en"]["workflow"] = "";
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with("universal_documentation", Mockery::type("array"))
-            ->andReturn("Output");
-
-        $result = $this->action->execute($structure);
-
-        $this->assertSame("Output", $result["content"]);
-    }
-
-    /**
-     * An unknown workflow identifier should fall back to "universal_documentation".
-     */
-    #[Test]
-    public function execute_resolves_unknown_workflow_to_universal_documentation(): void
-    {
-        $structure = $this->structure;
-        $structure["tracks"]["blog.com/blog/en"]["workflow"] =
-            "some_future_type";
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with("universal_documentation", Mockery::type("array"))
-            ->andReturn("Output");
-
-        $result = $this->action->execute($structure);
-
-        $this->assertSame("Output", $result["content"]);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Context building
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * The context passed to the executor should contain the expected keys
-     * derived from the structure and the first track.
-     */
-    #[Test]
-    public function execute_builds_context_from_structure_and_first_track(): void
-    {
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with(
-                "universal_documentation",
-                Mockery::on(function (array $ctx): bool {
-                    return $ctx["title"] ===
-                        "Can AI models be deployed on-premises?" &&
-                        $ctx["title_slug"] ===
-                            "can-ai-models-be-deployed-on-premises" &&
-                        $ctx["domain_dir"] ===
-                            "/tmp/agents/abc-123-def/2026_11_10_120000" &&
-                        $ctx["assets_dir"] ===
-                            "/tmp/agents/abc-123-def/2026_11_10_120000/assets" &&
-                        $ctx["research_dir"] ===
-                            "/tmp/research/abc-123-def/2026_11_10_120000" &&
-                        $ctx["research_text"] ===
-                            "Research about AI deployment." &&
-                        $ctx["type"] === "blog" &&
-                        $ctx["lang"] === "en";
-                }),
-            )
-            ->andReturn("Output");
+            ->withArgs(function (array $structure): bool {
+                return $structure === $this->structure;
+            })
+            ->andReturn([
+                "workflow_results" => ["blog.com" => ["blog-en" => "output"]],
+            ]);
 
         $this->action->execute($this->structure);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Structure passthrough
-    // ─────────────────────────────────────────────────────────────────────
-
     /**
-     * The returned structure should preserve all original keys and add
-     * only the "content" key.
+     * The executor's return value is returned directly — no wrapping, no mutation.
      */
     #[Test]
-    public function execute_preserves_original_keys_and_adds_content(): void
+    public function execute_returns_executor_result_directly(): void
     {
-        $this->executor->shouldReceive("execute")->once()->andReturn("Output");
+        $expected = [
+            "uuid" => "abc-123-def",
+            "title" => "Can AI models be deployed on-premises?",
+            "workflow_results" => [
+                "blog.com" => ["blog-en" => ["text" => "Generated content"]],
+                "meeting.com" => [
+                    "meeting-en" => ["text" => "Generated content"],
+                ],
+            ],
+        ];
+
+        $this->executor->shouldReceive("execute")->once()->andReturn($expected);
 
         $result = $this->action->execute($this->structure);
 
-        // Original keys preserved.
-        $this->assertSame($this->structure["uuid"], $result["uuid"]);
-        $this->assertSame($this->structure["title"], $result["title"]);
-        $this->assertSame(
-            $this->structure["title_slug"],
-            $result["title_slug"],
-        );
-        $this->assertSame(
-            $this->structure["domain_dir"],
-            $result["domain_dir"],
-        );
-        $this->assertSame(
-            $this->structure["assets_dir"],
-            $result["assets_dir"],
-        );
-        $this->assertSame(
-            $this->structure["research_dir"],
-            $result["research_dir"],
-        );
-        $this->assertSame($this->structure["tracks"], $result["tracks"]);
-
-        // New "content" key added.
-        $this->assertArrayHasKey("content", $result);
-        $this->assertSame("Output", $result["content"]);
+        $this->assertSame($expected, $result);
     }
 
+    // ─── Invocation count ────────────────────────────────────────────────
+
     /**
-     * The executor should be called exactly once with the full structure
-     * (not per-track).
+     * The executor is called exactly once regardless of the number of tracks.
      */
     #[Test]
     public function execute_calls_executor_exactly_once(): void
@@ -247,11 +200,48 @@ class WorkFlowAgentContentActionTest extends TestCase
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->andReturn("# Full article content");
+            ->andReturn(["ok" => true]);
 
-        $result = $this->action->execute($this->structure);
+        $this->action->execute($this->structure);
+    }
 
-        $this->assertIsString($result["content"]);
-        $this->assertNotSame("", $result["content"]);
+    /**
+     * Even with a single track, the executor is called exactly once.
+     */
+    #[Test]
+    public function execute_calls_executor_once_with_single_track(): void
+    {
+        $structure = $this->structure;
+        // Remove all but one track
+        $structure["tracks"] = [
+            "blog.com" => $structure["tracks"]["blog.com"],
+        ];
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn(["ok" => true]);
+
+        $this->action->execute($structure);
+    }
+
+    // ─── No side effects ─────────────────────────────────────────────────
+
+    /**
+     * The structure array is not mutated — the action is a pure pass-through.
+     */
+    #[Test]
+    public function execute_does_not_mutate_input_structure(): void
+    {
+        $original = $this->structure;
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn(["modified" => true]);
+
+        $this->action->execute($this->structure);
+
+        $this->assertSame($original, $this->structure);
     }
 }

@@ -33,38 +33,20 @@ class WorkFlowAgentContentAction
     /**
      * @param JsonWorkflowExecutor $executor The workflow execution engine.
      */
-    public function __construct(private JsonWorkflowExecutor $executor) {}
+    public function __construct(private JsonWorkflowExecutor $executor)
+    {
+        //
+    }
 
     /**
      * Execute the workflow for each track and attach the output.
      *
-     * @param array{
-     *     uuid: string,
-     *     domain_dir: string,
-     *     assets_dir: string,
-     *     research_dir: string,
-     *     title: string,
-     *     title_slug: string,
-     *     tracks: array<string, array{
-     *         domain: string,
-     *         type: string,
-     *         template: string,
-     *         track: string,
-     *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
-     *         content_json: string,
-     *         content_md: string,
-     *         description_md: string,
-     *         research_text: string
-     *     }>
-     * } $structure The full content structure from upstream actions.
+     * @param array  $structure Return value from {@see self::createStructure()}.
      *
      * @return array<string, mixed> The same structure with "content" added to each track.
      */
     public function execute(array $structure): array
     {
-        $structure["workflow_result"] = $this->executor->execute($structure);
-        return $structure;
+        return $this->executor->execute($structure);
     }
 }

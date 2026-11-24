@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncTemplates\Engine;
 
 use App\PncTemplates\Engine\MarkdownDocument;

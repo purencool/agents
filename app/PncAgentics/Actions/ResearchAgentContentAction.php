@@ -27,7 +27,10 @@ class ResearchAgentContentAction
     /**
      * @param ResearchGatherer $gatherer The research gatherer service.
      */
-    public function __construct(protected ResearchGatherer $gatherer) {}
+    public function __construct(protected ResearchGatherer $gatherer)
+    {
+        //
+    }
 
     /**
      * Execute the research gathering for all tracks in the structure.

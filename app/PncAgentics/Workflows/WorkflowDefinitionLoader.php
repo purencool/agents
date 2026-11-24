@@ -75,9 +75,9 @@ class WorkflowDefinitionLoader
             return $this->decode($defaultPath);
         }
 
-        //  Fallback: try default.json in the definitions directory.
+        //  Fallback: try blog_post.json in the definitions directory.
         $fallbackPath =
-            $this->definitionsDir . DIRECTORY_SEPARATOR . "default.json";
+            $this->definitionsDir . DIRECTORY_SEPARATOR . "blog_post.json";
         if (File::exists($fallbackPath)) {
             return $this->decode($fallbackPath);
         }

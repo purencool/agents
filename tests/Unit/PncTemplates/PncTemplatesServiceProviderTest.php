@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncTemplates;
 
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
@@ -19,21 +18,29 @@ use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
- * Unit tests for PncTemplatesServiceProvider.
+ * Unit tests for {@see PncTemplatesServiceProvider}.
  *
  * Verifies:
- *  - register() binds the interface to the concrete service.
+ *  - register() binds TemplateTransformerInterface to TemplateTransformerService.
  *  - The binding is non-singleton (each resolution creates a new instance).
- *  - boot() does not throw (config merge is optional/safe).
+ *  - boot() completes without error (currently a no-op).
+ *
+ * @covers \App\PncTemplates\PncTemplatesServiceProvider
  */
 final class PncTemplatesServiceProviderTest extends TestCase
 {
     /**
-     * Ensure the service provider is registered for this test.
+     * Register the service provider for this test.
+     *
+     * @param \Illuminate\Foundation\Application $app
+     *
+     * @return array<int, class-string>
      */
     protected function getPackageProviders($app): array
     {
-        return [PncTemplatesServiceProvider::class];
+        return array_merge(parent::getPackageProviders($app), [
+            PncTemplatesServiceProvider::class,
+        ]);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -82,38 +89,17 @@ final class PncTemplatesServiceProviderTest extends TestCase
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * boot() completes without error regardless of whether
-     * config/templates.php exists.
+     * boot() completes without error.
+     *
+     * The provider was already booted by the test framework via
+     * getPackageProviders(), so we simply verify the app is functional
+     * after the boot cycle.
      */
     #[Test]
     public function boot_completes_without_error(): void
     {
-        $provider = new PncTemplatesServiceProvider($this->app);
-        $provider->register();
-        $provider->boot();
-
-        $this->assertTrue(true); // No exception = pass
-    }
-
-    /**
-     * After boot(), the "templates" config key exists if the
-     * config file is present, or is absent if it is not.
-     *
-     * This is a soft check — it documents the conditional behaviour.
-     */
-    #[Test]
-    public function config_key_exists_only_if_file_present(): void
-    {
-        $configFile = app_path("PncTemplates/config/templates.php");
-
-        $provider = new PncTemplatesServiceProvider($this->app);
-        $provider->register();
-        $provider->boot();
-
-        if (file_exists($configFile)) {
-            $this->assertNotNull(config("templates"));
-        } else {
-            $this->assertNull(config("templates"));
-        }
+        // The provider was registered and booted by the framework.
+        // If boot() threw, the test would have failed during setup.
+        $this->assertTrue(true);
     }
 }

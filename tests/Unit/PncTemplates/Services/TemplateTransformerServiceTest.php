@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncTemplates\Services;
 
 use App\PncTemplates\Contracts\TemplateTransformerInterface;
@@ -21,17 +20,29 @@ use App\PncServices\Contracts\ContentPersistenceInterface;
 use InvalidArgumentException;
 use Mockery;
 use Mockery\MockInterface;
+use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
- * Unit tests for TemplateTransformerService.
+ * Unit tests for {@see TemplateTransformerService}.
  *
  * Verifies the full transformation pipeline:
- *  - Markdown reading and null-guard
- *  - Template resolution cascade (override → app → default → exception)
- *  - Parser and renderer delegation
- *  - Output persistence (JSON + HTML elements)
- *  - Return value structure
+ *  - Content is passed in-memory (no disk read via persistence).
+ *  - "text" key → parser is called, MarkdownDocument is produced.
+ *  - Structured content (no "text" key) → MarkdownDocument is constructed
+ *    from title/introduction/sections/conclusion keys (parser NOT called).
+ *  - Template resolution cascade (override → app → default → exception).
+ *  - Renderer receives a MarkdownDocument (never a raw array).
+ *  - Output persistence (JSON + HTML elements) via ContentPersistenceInterface.
+ *  - target_directory is derived from dirname(content_path_markdown).
+ *  - Return value structure.
+ *
+ * Template files are real files on disk (File::get() is used, not a mock).
+ * Config keys:
+ *  - pnc.templates.override_dir  (relative path, resolved via base_path())
+ *  - pnc.templates.templates_dir (absolute path)
+ *
+ * @covers \App\PncTemplates\Services\TemplateTransformerService
  */
 final class TemplateTransformerServiceTest extends TestCase
 {
@@ -47,14 +58,17 @@ final class TemplateTransformerServiceTest extends TestCase
     /** @var TemplateTransformerService */
     private TemplateTransformerService $service;
 
-    /** @var string Temp directory used for template override resolution. */
-    private string $overrideDir;
+    /** @var string Relative path for override dir (goes into config). */
+    private string $overrideRelative;
+
+    /** @var string Absolute path for override dir (where files are created). */
+    private string $overrideAbsolute;
+
+    /** @var string Absolute path for the app-level templates dir. */
+    private string $templatesDir;
 
     /**
-     * Set up mocks, temp template file, and service instance.
-     */
-    /**
-     * Set up mocks, temp template file, and service instance.
+     * Set up mocks, temp template files, config, and service instance.
      */
     protected function setUp(): void
     {
@@ -70,30 +84,42 @@ final class TemplateTransformerServiceTest extends TestCase
             $this->renderer,
         );
 
-        $this->overrideDir =
-            sys_get_temp_dir() . "/pnc_test_overrides_" . uniqid();
-        mkdir($this->overrideDir, 0755, true);
+        // Override dir: relative path in config, absolute on disk.
+        $this->overrideRelative = "test_template_overrides_" . uniqid();
+        $this->overrideAbsolute = base_path($this->overrideRelative);
+        mkdir($this->overrideAbsolute, 0755, true);
+
+        // App-level templates dir: absolute path.
+        $this->templatesDir = sys_get_temp_dir() . "/pnc_templates_" . uniqid();
+        mkdir($this->templatesDir, 0755, true);
+
+        // Create a default template in the app-level dir.
         file_put_contents(
-            $this->overrideDir . "/blog_post.json",
-            json_encode(["name" => "blog_post", "elements" => ["body"]]),
+            $this->templatesDir . "/default.json",
+            json_encode([
+                "name" => "default",
+                "fields" => [],
+                "elements" => [],
+            ]),
         );
 
-        $_ENV["TEMPLATE_OVERRIDES"] = $this->overrideDir;
-        $_SERVER["TEMPLATE_OVERRIDES"] = $this->overrideDir;
+        config()->set("pnc.templates.override_dir", null);
+        config()->set("pnc.templates.templates_dir", $this->templatesDir);
     }
 
     /**
-     * Clean up temp files and Mockery.
+     * Clean up temp files, reset config, close Mockery.
      */
     protected function tearDown(): void
     {
-        array_map("unlink", glob($this->overrideDir . "/*") ?: []);
-        @rmdir($this->overrideDir);
+        $this->removeDirectory($this->overrideAbsolute);
+        $this->removeDirectory($this->templatesDir);
 
-        unset($_ENV["TEMPLATE_OVERRIDES"], $_SERVER["TEMPLATE_OVERRIDES"]);
+        config()->set("pnc.templates.override_dir", null);
+        config()->set("pnc.templates.templates_dir", null);
 
-        parent::tearDown();
         Mockery::close();
+        parent::tearDown();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -101,7 +127,7 @@ final class TemplateTransformerServiceTest extends TestCase
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * A standard trackInfo array matching the documented shape.
+     * A standard trackInfo array matching the production shape.
      */
     private function trackInfo(): array
     {
@@ -109,14 +135,16 @@ final class TemplateTransformerServiceTest extends TestCase
             "domain" => "example.com",
             "type" => "article",
             "template" => "blog_post",
-            "track" => "track-1",
+            "track" => "blog_post",
             "track_type" => "blog",
-            "workflow" => "standard",
+            "workflow" => "blog_post",
             "lang" => "en",
-            "content_json" => "/output/track-1/content.json",
-            "content_md" => "/output/track-1/content.md",
-            "description_md" => "/output/track-1/description.md",
-            "research_text" => "research text",
+            "context" => "This for marketing",
+            "content_path_json" => "/output/examplecom/article-en/content.json",
+            "content_path_markdown" =>
+                "/output/examplecom/article-en/content.md",
+            "content_description" =>
+                "/output/examplecom/article-en/description.md",
         ];
     }
 
@@ -135,7 +163,7 @@ final class TemplateTransformerServiceTest extends TestCase
     }
 
     /**
-     * Create a mock MarkdownDocument to satisfy the return type.
+     * A mock MarkdownDocument instance.
      */
     private function markdownDocument(): MarkdownDocument
     {
@@ -143,85 +171,180 @@ final class TemplateTransformerServiceTest extends TestCase
     }
 
     /**
-     * Wire up the happy-path mock expectations for a full transform call.
+     * Recursively remove a directory.
      */
-    private function mockHappyPath(): void
+    private function removeDirectory(string $dir): void
     {
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->with("/output/track-1/content.md")
-            ->andReturn('# Hello\n\nWorld');
+        if (!is_dir($dir)) {
+            return;
+        }
 
-        $this->persistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->andReturn([
-                "name" => "blog_post",
-                "elements" => ["header", "body"],
-            ]);
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $dir,
+                \FilesystemIterator::SKIP_DOTS,
+            ),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+
+        foreach ($items as $item) {
+            $item->isDir()
+                ? rmdir($item->getPathname())
+                : unlink($item->getPathname());
+        }
+
+        rmdir($dir);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Happy path — "text" key (markdown parsing)
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * When contentData contains a "text" key with a string value,
+     * the parser IS called and its MarkdownDocument result is passed
+     * to the renderer.
+     */
+    #[Test]
+    public function transform_with_text_key_calls_parser(): void
+    {
+        $contentData = ["text" => "# Hello\n\nWorld"];
+        $doc = $this->markdownDocument();
 
         $this->parser
             ->shouldReceive("parse")
             ->once()
-            ->andReturn($this->markdownDocument());
+            ->with("# Hello\n\nWorld")
+            ->andReturn($doc);
 
         $this->renderer
             ->shouldReceive("render")
             ->once()
+            ->withArgs(function ($parsed, array $template, array $data) use (
+                $doc,
+            ): bool {
+                return $parsed === $doc && $data["text"] === "# Hello\n\nWorld";
+            })
             ->andReturn($this->renderResult());
 
         $this->persistence
             ->shouldReceive("saveJson")
             ->once()
-            ->with("/output/track-1/content.json", [
+            ->with("/output/examplecom/article-en/content.json", [
                 "title" => "Hello",
                 "body" => "World",
             ]);
 
-        $this->persistence
-            ->shouldReceive("saveHtml")
-            ->once()
-            ->with("/output/track-1/element_header.html", "<h1>Hello</h1>");
+        $this->persistence->shouldReceive("saveHtml")->twice();
 
-        $this->persistence
-            ->shouldReceive("saveHtml")
-            ->once()
-            ->with("/output/track-1/element_body.html", "<p>World</p>");
-    }
+        $result = $this->service->transform(
+            "default",
+            $this->trackInfo(),
+            $contentData,
+        );
 
-    // ─────────────────────────────────────────────────────────────
-    // Happy path
-    // ─────────────────────────────────────────────────────────────
-
-    /**
-     * A full successful transform reads markdown, loads the template,
-     * parses, renders, persists all artifacts, and returns the
-     * documented array structure.
-     */
-    public function test_transform_returns_expected_structure_on_success(): void
-    {
-        $this->mockHappyPath();
-
-        $result = $this->service->transform("blog_post", $this->trackInfo(), [
-            "key" => "value",
-        ]);
-
-        $this->assertSame("/output/track-1", $result["target_directory"]);
+        $this->assertSame(
+            "/output/examplecom/article-en",
+            $result["target_directory"],
+        );
         $this->assertSame(
             ["title" => "Hello", "body" => "World"],
             $result["extracted_fields"],
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Happy path — structured content (no "text" key)
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * When contentData is a structured array (no "text" key), the parser
+     * is NOT called. A MarkdownDocument is constructed from the structured
+     * keys and passed to the renderer.
+     */
+    #[Test]
+    public function transform_with_structured_content_skips_parser(): void
+    {
+        $contentData = [
+            "title" => "Hello",
+            "introduction" => "Intro text",
+            "sections" => ["Section A" => "Content A"],
+            "conclusion" => "Conclusion text",
+        ];
+
+        // Parser should NOT be called for structured content.
+        $this->parser->shouldNotReceive("parse");
+
+        $this->renderer
+            ->shouldReceive("render")
+            ->once()
+            ->withArgs(function ($doc, array $template, array $data): bool {
+                // $doc must be a MarkdownDocument (not an array)
+                return $doc instanceof MarkdownDocument &&
+                    $data["title"] === "Hello" &&
+                    $data["conclusion"] === "Conclusion text";
+            })
+            ->andReturn($this->renderResult());
+
+        $this->persistence
+            ->shouldReceive("saveJson")
+            ->once()
+            ->with("/output/examplecom/article-en/content.json", [
+                "title" => "Hello",
+                "body" => "World",
+            ]);
+
+        $this->persistence->shouldReceive("saveHtml")->twice();
+
+        $result = $this->service->transform(
+            "default",
+            $this->trackInfo(),
+            $contentData,
+        );
+
         $this->assertSame(
-            ["header" => "<h1>Hello</h1>", "body" => "<p>World</p>"],
-            $result["html_elements"],
+            "/output/examplecom/article-en",
+            $result["target_directory"],
         );
     }
 
     /**
+     * When contentData is an empty array, a MarkdownDocument with empty
+     * fields is constructed and passed to the renderer.
+     */
+    #[Test]
+    public function transform_with_empty_content_data(): void
+    {
+        $this->parser->shouldNotReceive("parse");
+
+        $this->renderer
+            ->shouldReceive("render")
+            ->once()
+            ->withArgs(function ($doc, array $template, array $data): bool {
+                return $doc instanceof MarkdownDocument && $data === [];
+            })
+            ->andReturn([
+                "raw_json_fields" => [],
+                "html_elements" => [],
+            ]);
+
+        $this->persistence
+            ->shouldReceive("saveJson")
+            ->once()
+            ->with("/output/examplecom/article-en/content.json", []);
+
+        $this->service->transform("default", $this->trackInfo(), []);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Contract
+    // ─────────────────────────────────────────────────────────────
+
+    /**
      * The service implements TemplateTransformerInterface.
      */
-    public function test_service_implements_contract(): void
+    #[Test]
+    public function service_implements_contract(): void
     {
         $this->assertInstanceOf(
             TemplateTransformerInterface::class,
@@ -230,89 +353,154 @@ final class TemplateTransformerServiceTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Markdown null guard
-    // ─────────────────────────────────────────────────────────────
-
-    /**
-     * When contentPersistence->readText() returns null, an
-     * InvalidArgumentException is thrown with the file path.
-     */
-    public function test_throws_when_markdown_not_found(): void
-    {
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->with("/output/track-1/content.md")
-            ->andReturn(null);
-
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage(
-            "Content markdown not found at: /output/track-1/content.md",
-        );
-
-        $this->service->transform("blog_post", $this->trackInfo(), []);
-    }
-
-    // ─────────────────────────────────────────────────────────────
     // Template resolution
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * When the resolved template path yields null from readJson,
-     * an InvalidArgumentException is thrown.
+     * When the override dir is set (relative) and contains the file,
+     * it is preferred over the app-level templates dir.
      */
-    public function test_throws_when_template_json_is_invalid(): void
+    #[Test]
+    public function transform_resolves_template_from_override_directory(): void
     {
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->andReturn("# Content");
+        file_put_contents(
+            $this->overrideAbsolute . "/my_template.json",
+            json_encode([
+                "name" => "my_template",
+                "source" => "override",
+                "fields" => [],
+                "elements" => [],
+            ]),
+        );
 
-        $this->persistence->shouldReceive("readJson")->once()->andReturn(null);
+        file_put_contents(
+            $this->templatesDir . "/my_template.json",
+            json_encode([
+                "name" => "my_template",
+                "source" => "app",
+                "fields" => [],
+                "elements" => [],
+            ]),
+        );
+
+        config()->set("pnc.templates.override_dir", $this->overrideRelative);
+
+        $this->parser->shouldNotReceive("parse");
+
+        $this->renderer
+            ->shouldReceive("render")
+            ->once()
+            ->withArgs(function ($doc, array $template, array $data): bool {
+                return $template["source"] === "override";
+            })
+            ->andReturn(["raw_json_fields" => [], "html_elements" => []]);
+
+        $this->persistence
+            ->shouldReceive("saveJson")
+            ->once()
+            ->with("/output/examplecom/article-en/content.json", []);
+
+        $this->service->transform("my_template", $this->trackInfo(), []);
+    }
+
+    /**
+     * When the override dir is set but does NOT contain the file,
+     * resolution falls through to the app-level templates dir.
+     */
+    #[Test]
+    public function transform_falls_through_to_app_templates_when_override_missing(): void
+    {
+        config()->set("pnc.templates.override_dir", $this->overrideRelative);
+
+        file_put_contents(
+            $this->templatesDir . "/my_template.json",
+            json_encode([
+                "name" => "my_template",
+                "source" => "app",
+                "fields" => [],
+                "elements" => [],
+            ]),
+        );
+
+        $this->parser->shouldNotReceive("parse");
+
+        $this->renderer
+            ->shouldReceive("render")
+            ->once()
+            ->withArgs(function ($doc, array $template, array $data): bool {
+                return $template["source"] === "app";
+            })
+            ->andReturn(["raw_json_fields" => [], "html_elements" => []]);
+
+        $this->persistence
+            ->shouldReceive("saveJson")
+            ->once()
+            ->with("/output/examplecom/article-en/content.json", []);
+
+        $this->service->transform("my_template", $this->trackInfo(), []);
+    }
+
+    /**
+     * When neither the override nor the named file exists, resolution
+     * falls back to default.json in the app-level dir.
+     */
+    #[Test]
+    public function transform_falls_back_to_default_json(): void
+    {
+        // No override, no named file. default.json exists from setUp().
+
+        $this->parser->shouldNotReceive("parse");
+
+        $this->renderer
+            ->shouldReceive("render")
+            ->once()
+            ->withArgs(function ($doc, array $template, array $data): bool {
+                return $template["name"] === "default";
+            })
+            ->andReturn(["raw_json_fields" => [], "html_elements" => []]);
+
+        $this->persistence
+            ->shouldReceive("saveJson")
+            ->once()
+            ->with("/output/examplecom/article-en/content.json", []);
+
+        $this->service->transform(
+            "nonexistent_template",
+            $this->trackInfo(),
+            [],
+        );
+    }
+
+    /**
+     * When no template is found anywhere, an InvalidArgumentException is thrown.
+     */
+    #[Test]
+    public function transform_throws_when_no_template_found(): void
+    {
+        unlink($this->templatesDir . "/default.json");
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Could not resolve template");
+
+        $this->service->transform("nonexistent", $this->trackInfo(), []);
+    }
+
+    /**
+     * When the template file contains invalid JSON, an InvalidArgumentException
+     * is thrown with the JSON error message.
+     */
+    #[Test]
+    public function transform_throws_on_invalid_template_json(): void
+    {
+        file_put_contents(
+            $this->templatesDir . "/broken.json",
+            "{invalid json here",
+        );
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("is not valid JSON");
 
-        $this->service->transform("blog_post", $this->trackInfo(), []);
-    }
-
-    /**
-     * The override directory is checked first: when TEMPLATE_OVERRIDES
-     * is set and contains the file, that path is used for readJson.
-     */
-    public function test_resolves_template_from_override_directory(): void
-    {
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->andReturn("# Content");
-
-        $this->persistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with($this->overrideDir . "/blog_post.json")
-            ->andReturn(["name" => "blog_post"]);
-
-        $this->parser
-            ->shouldReceive("parse")
-            ->once()
-            ->andReturn($this->markdownDocument());
-        $this->renderer
-            ->shouldReceive("render")
-            ->once()
-            ->andReturn([
-                "raw_json_fields" => [],
-                "html_elements" => [],
-            ]);
-
-        // ← These two lines were missing:
-        $this->persistence
-            ->shouldReceive("saveJson")
-            ->once()
-            ->with("/output/track-1/content.json", []);
-        $this->persistence->shouldNotReceive("saveHtml");
-
-        $this->service->transform("blog_post", $this->trackInfo(), []);
+        $this->service->transform("broken", $this->trackInfo(), []);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -323,20 +511,11 @@ final class TemplateTransformerServiceTest extends TestCase
      * When the renderer returns zero HTML elements, no saveHtml calls
      * are made but saveJson is still called.
      */
-    public function test_saves_json_but_no_html_when_no_elements(): void
+    #[Test]
+    public function transform_saves_json_but_no_html_when_no_elements(): void
     {
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->andReturn("# Content");
-        $this->persistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->andReturn(["name" => "blog_post"]);
-        $this->parser
-            ->shouldReceive("parse")
-            ->once()
-            ->andReturn($this->markdownDocument());
+        $this->parser->shouldNotReceive("parse");
+
         $this->renderer
             ->shouldReceive("render")
             ->once()
@@ -348,14 +527,13 @@ final class TemplateTransformerServiceTest extends TestCase
         $this->persistence
             ->shouldReceive("saveJson")
             ->once()
-            ->with("/output/track-1/content.json", ["title" => "Only JSON"]);
+            ->with("/output/examplecom/article-en/content.json", [
+                "title" => "Only JSON",
+            ]);
+
         $this->persistence->shouldNotReceive("saveHtml");
 
-        $result = $this->service->transform(
-            "blog_post",
-            $this->trackInfo(),
-            [],
-        );
+        $result = $this->service->transform("default", $this->trackInfo(), []);
 
         $this->assertSame([], $result["html_elements"]);
     }
@@ -363,20 +541,11 @@ final class TemplateTransformerServiceTest extends TestCase
     /**
      * Multiple HTML elements are each saved to their own file.
      */
-    public function test_saves_each_html_element_to_separate_file(): void
+    #[Test]
+    public function transform_saves_each_html_element_to_separate_file(): void
     {
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->andReturn("# Content");
-        $this->persistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->andReturn(["name" => "blog_post"]);
-        $this->parser
-            ->shouldReceive("parse")
-            ->once()
-            ->andReturn($this->markdownDocument());
+        $this->parser->shouldNotReceive("parse");
+
         $this->renderer
             ->shouldReceive("render")
             ->once()
@@ -390,24 +559,32 @@ final class TemplateTransformerServiceTest extends TestCase
             ]);
 
         $this->persistence->shouldReceive("saveJson")->once();
-        $this->persistence
-            ->shouldReceive("saveHtml")
-            ->once()
-            ->with("/output/track-1/element_header.html", "<h1>H</h1>");
-        $this->persistence
-            ->shouldReceive("saveHtml")
-            ->once()
-            ->with("/output/track-1/element_body.html", "<p>B</p>");
-        $this->persistence
-            ->shouldReceive("saveHtml")
-            ->once()
-            ->with("/output/track-1/element_footer.html", "<footer>F</footer>");
 
-        $result = $this->service->transform(
-            "blog_post",
-            $this->trackInfo(),
-            [],
-        );
+        $this->persistence
+            ->shouldReceive("saveHtml")
+            ->once()
+            ->with(
+                "/output/examplecom/article-en/element_header.html",
+                "<h1>H</h1>",
+            );
+
+        $this->persistence
+            ->shouldReceive("saveHtml")
+            ->once()
+            ->with(
+                "/output/examplecom/article-en/element_body.html",
+                "<p>B</p>",
+            );
+
+        $this->persistence
+            ->shouldReceive("saveHtml")
+            ->once()
+            ->with(
+                "/output/examplecom/article-en/element_footer.html",
+                "<footer>F</footer>",
+            );
+
+        $result = $this->service->transform("default", $this->trackInfo(), []);
 
         $this->assertCount(3, $result["html_elements"]);
     }
@@ -417,63 +594,28 @@ final class TemplateTransformerServiceTest extends TestCase
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * target_directory is derived from dirname(content_md).
+     * target_directory is derived from dirname(content_path_markdown).
      */
-    public function test_target_directory_is_derived_from_content_md_path(): void
+    #[Test]
+    public function transform_target_directory_is_derived_from_content_path_markdown(): void
     {
         $info = $this->trackInfo();
-        $info["content_md"] = "/deep/nested/path/article.md";
+        $info["content_path_markdown"] = "/deep/nested/path/article.md";
 
-        $this->persistence->shouldReceive("readText")->once()->andReturn("# X");
-        $this->persistence->shouldReceive("readJson")->once()->andReturn([]);
-        $this->parser
-            ->shouldReceive("parse")
-            ->once()
-            ->andReturn($this->markdownDocument());
+        $this->parser->shouldNotReceive("parse");
+
         $this->renderer
             ->shouldReceive("render")
             ->once()
-            ->andReturn([
-                "raw_json_fields" => [],
-                "html_elements" => [],
-            ]);
+            ->andReturn(["raw_json_fields" => [], "html_elements" => []]);
+
         $this->persistence
             ->shouldReceive("saveJson")
             ->once()
             ->with("/deep/nested/path/content.json", []);
 
-        $result = $this->service->transform("blog_post", $info, []);
+        $result = $this->service->transform("default", $info, []);
 
         $this->assertSame("/deep/nested/path", $result["target_directory"]);
-    }
-
-    /**
-     * When no override or named template exists, resolution falls through
-     * to default.json. If readJson returns null for it, an
-     * InvalidArgumentException about invalid JSON is thrown.
-     */
-    public function test_throws_when_default_template_is_invalid_json(): void
-    {
-        unset($_ENV["TEMPLATE_OVERRIDES"], $_SERVER["TEMPLATE_OVERRIDES"]);
-
-        $this->persistence
-            ->shouldReceive("readText")
-            ->once()
-            ->andReturn("# Content");
-
-        $this->persistence
-            ->shouldReceive("readJson")
-            ->once()
-            ->with(app_path("PncTemplates/Templates/default.json"))
-            ->andReturn(null);
-
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage("is not valid JSON");
-
-        $this->service->transform(
-            "definitely_not_a_real_template",
-            $this->trackInfo(),
-            [],
-        );
     }
 }

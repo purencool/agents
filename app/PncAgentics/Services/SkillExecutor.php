@@ -205,8 +205,8 @@ class SkillExecutor implements SkillExecutorInterface
      *  2. app/PncAgentics/Skills/ — the default baked-in location.
      *
      * Key conventions:
-     *  - Keys ending in ".skills" map to `<dir>/<name>.skills.md`
-     *  - Other keys map to `<dir>/<name>.md`
+     *  - Keys ending in ".skills" map to `<dir>/<name>.json`
+     *  - Other keys map to `<dir>/<name>.json`
      *  - Dots are converted to directory separators.
      *
      * @param string $skillKey Dot-notation skill key.
@@ -226,10 +226,11 @@ class SkillExecutor implements SkillExecutorInterface
                 str_replace(".", DIRECTORY_SEPARATOR, $directoryParts) .
                 DIRECTORY_SEPARATOR .
                 $fileName .
-                ".skills.md";
+                ".skills.json";
         } else {
             $relativePath =
-                str_replace(".", DIRECTORY_SEPARATOR, $skillKey) . ".md";
+                str_replace(".", DIRECTORY_SEPARATOR, $skillKey) .
+                ".skills.json";
         }
 
         $overridesBase = env("OVERLAY_OVERRIDES");

@@ -60,39 +60,49 @@ class CreateAgentStructureAction
      * @param array{
      *     title: string,
      *     description?: string,
-     *     domains: array<string, array{
+     *     categories?: string,
+     *     domains: array<string, array<string, array{
      *         context?: string,
-     *         fields: array<string, array{
-     *             content_tracks?: array{
-     *                 config?: array{
-     *                     workflow?: string,
-     *                     template?: string,
-     *                     track?: string,
-     *                     type?: string,
-     *                     lang?: string
-     *                 }
+     *         content_tracks?: array{
+     *             config?: array{
+     *                 workflow?: string,
+     *                 template?: string,
+     *                 track?: string,
+     *                 type?: string,
+     *                 lang?: string
      *             }
-     *         }>
-     *     }>>
-     * } $data Validated payload with title, optional description, and domain/track config.
+     *         }
+     *     }>>$data Validated payload with title, optional description, and domain/track config.
      *
      * @return array{
      *     uuid: string,
+     *     title: string,
+     *     title_slug: string,
+     *     description: string,
+     *     categories: string[],
      *     domain_dir: string,
      *     assets_dir: string,
      *     research_dir: string,
-     *     tracks: array<string, array{
+     *     tracks: array<string, array<string, array{
+     *         uuid: string,
+     *         title: string,
+     *         categories: string[],
+     *         workflow: string,
+     *         lang: string,
      *         domain: string,
+     *         context: string,
      *         type: string,
      *         template: string,
      *         track: string,
      *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
      *         content_json: string,
-     *         content_md: string,
-     *         description_md: string
-     *     }>
+     *         content_path_json: string,
+     *         content_html: string,
+     *         content_path_html: string,
+     *         content_markdown: string,
+     *         content_path_markdown: string,
+     *         content_description: string
+     *     }>>
      * }
      *
      * @throws RuntimeException If a directory cannot be created.

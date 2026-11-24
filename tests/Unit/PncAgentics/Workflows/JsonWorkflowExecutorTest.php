@@ -13,7 +13,6 @@ namespace Tests\Unit\PncAgentics\Workflows;
 
 use App\PncAgentics\Contracts\SkillExecutorInterface;
 use App\PncAgentics\Workflows\JsonWorkflowExecutor;
-use App\PncServices\Contracts\ContentPersistenceInterface;
 use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
@@ -22,23 +21,28 @@ use Tests\TestCase;
 /**
  * Unit tests for {@see JsonWorkflowExecutor}.
  *
- * Tests the orchestration layer — how the executor loads definitions,
- * dispatches stages (linear and loop), applies transforms, persists output,
- * and returns the final result.
+ * Tests the orchestration layer — how the executor:
+ *  - Iterates the two-level tracks array (domain → type-lang).
+ *  - Builds a flat context per track via buildContext().
+ *  - Loads the workflow definition per track's "workflow" field.
+ *  - Dispatches linear stages (skill call → transform → store in context).
+ *  - Dispatches loop stages via LoopStageExecutor.
+ *  - Extracts the final output from the last stage's output_key.
+ *  - Persists output to the track's content files on disk.
+ *  - Returns the structure with "workflow_results" added.
  *
  * Delegated concerns tested in their own test classes:
  *  - {@see WorkflowDefinitionLoaderTest} — file resolution, JSON decoding,
- *    3-tier resolution order, default.json fallback.
+ *    config override, blog_post.json fallback.
  *  - {@see LoopStageExecutorTest} — iteration, per-iteration reset,
  *    accumulation, JSON string source decoding.
  *  - {@see TemplateResolverTest} — {{key}} interpolation, type preservation,
  *    array/object JSON-encoding.
  *  - {@see StageTransformTest} — strip_code_fence, json_decode, unknown passthrough.
- *  - {@see WorkflowPersisterTest} — path/filename resolution, output_key
- *    fallback, content type handling, call ordering.
  *
- * File I/O is directed to a temporary directory. SkillExecutorInterface and
- * ContentPersistenceInterface are mocked via Mockery.
+ * File I/O is directed to a temporary directory. SkillExecutorInterface is
+ * mocked via Mockery. Content files (content_path_json, content_path_markdown)
+ * are created as real temp files to test persistTrackOutput().
  *
  * @covers \App\PncAgentics\Workflows\JsonWorkflowExecutor
  */
@@ -50,14 +54,14 @@ class JsonWorkflowExecutorTest extends TestCase
     private SkillExecutorInterface $executor;
 
     /**
-     * Mock content persistence service (handles disk writes).
-     */
-    private ContentPersistenceInterface $persistence;
-
-    /**
      * Temporary directory acting as the default definitions dir.
      */
     private string $definitionsDir;
+
+    /**
+     * Temporary base directory for content files.
+     */
+    private string $contentDir;
 
     /**
      * The system under test.
@@ -65,7 +69,8 @@ class JsonWorkflowExecutorTest extends TestCase
     private JsonWorkflowExecutor $sut;
 
     /**
-     * Set up temp directory, mock interfaces, instantiate the executor.
+     * Set up temp directories, mock the skill executor, configure the loader,
+     * and instantiate the executor.
      */
     protected function setUp(): void
     {
@@ -75,29 +80,112 @@ class JsonWorkflowExecutorTest extends TestCase
             sys_get_temp_dir() . "/wf_definitions_" . uniqid();
         mkdir($this->definitionsDir, 0755, true);
 
+        $this->contentDir = sys_get_temp_dir() . "/wf_content_" . uniqid();
+        mkdir($this->contentDir, 0755, true);
+
         $this->executor = Mockery::mock(SkillExecutorInterface::class);
-        $this->persistence = Mockery::mock(ContentPersistenceInterface::class);
 
-        $this->sut = new JsonWorkflowExecutor(
-            $this->executor,
-            $this->persistence,
-            $this->definitionsDir,
-        );
-
-        $this->unsetEnv("OVERLAY_WORKFLOWS");
+        // Point the WorkflowDefinitionLoader at our temp definitions dir.
+        config()->set("pnc.workflows.definitions_dir", $this->definitionsDir);
         config()->set("pnc.workflows.override_dir", null);
+
+        $this->sut = new JsonWorkflowExecutor($this->executor);
     }
 
     /**
-     * Clean up temp directory, reset env/config, close Mockery.
+     * Clean up temp directories, reset config, close Mockery.
      */
     protected function tearDown(): void
     {
         $this->removeDirectory($this->definitionsDir);
-        $this->unsetEnv("OVERLAY_WORKFLOWS");
+        $this->removeDirectory($this->contentDir);
+
+        config()->set("pnc.workflows.definitions_dir", null);
         config()->set("pnc.workflows.override_dir", null);
+
         Mockery::close();
         parent::tearDown();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // execute() — basic structure passthrough
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * The returned structure should preserve all original top-level keys
+     * and add a "workflow_results" key.
+     */
+    #[Test]
+    public function execute_preserves_structure_and_adds_workflow_results(): void
+    {
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "test_skill",
+                    "variables" => [],
+                    "options" => [],
+                    "output_key" => "final_output",
+                ],
+            ],
+        ]);
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn("Generated content");
+
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
+
+        // Original keys preserved
+        $this->assertSame($structure["uuid"], $result["uuid"]);
+        $this->assertSame($structure["title"], $result["title"]);
+        $this->assertSame($structure["title_slug"], $result["title_slug"]);
+        $this->assertSame($structure["description"], $result["description"]);
+        $this->assertSame($structure["categories"], $result["categories"]);
+        $this->assertSame($structure["domain_dir"], $result["domain_dir"]);
+        $this->assertSame($structure["assets_dir"], $result["assets_dir"]);
+        $this->assertSame($structure["research_dir"], $result["research_dir"]);
+        $this->assertSame($structure["tracks"], $result["tracks"]);
+
+        // workflow_results added
+        $this->assertArrayHasKey("workflow_results", $result);
+    }
+
+    /**
+     * The workflow_results key should be keyed by domain → trackKey.
+     */
+    #[Test]
+    public function execute_workflow_results_keyed_by_domain_and_track(): void
+    {
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "test_skill",
+                    "variables" => [],
+                    "options" => [],
+                    "output_key" => "final_output",
+                ],
+            ],
+        ]);
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn("Output text");
+
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
+
+        $this->assertArrayHasKey("blog.com", $result["workflow_results"]);
+        $this->assertArrayHasKey(
+            "blog-en",
+            $result["workflow_results"]["blog.com"],
+        );
+        $this->assertSame(
+            ["text" => "Output text"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -106,13 +194,13 @@ class JsonWorkflowExecutorTest extends TestCase
 
     /**
      * A single linear stage should call the executor with resolved variables
-     * and options, store the result under output_key, and return it as the
-     * workflow's final output.
+     * and options, store the result under output_key, and wrap string output
+     * in a ["text" => ...] array.
      */
     #[Test]
-    public function execute_singleLinearStageReturnsOutput(): void
+    public function execute_singleLinearStageWrapsStringInTextArray(): void
     {
-        $this->writeWorkflow("simple", [
+        $this->writeWorkflow("default", [
             "stages" => [
                 [
                     "skill" => "research_preparation.outline_generator",
@@ -128,25 +216,28 @@ class JsonWorkflowExecutorTest extends TestCase
             ->once()
             ->with(
                 "research_preparation.outline_generator",
-                ["title" => "My Article"],
+                ["title" => "Can AI models be deployed on-premises?"],
                 ["temperature" => 0.2],
             )
             ->andReturn("Generated outline");
 
-        $result = $this->sut->execute("simple", ["title" => "My Article"]);
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
 
-        $this->assertSame("Generated outline", $result);
+        $this->assertSame(
+            ["text" => "Generated outline"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
     }
 
     /**
      * Multiple linear stages should pass context forward — the output_key
-     * of one stage is available as a {{key}} variable in the next stage's
-     * variables map.
+     * of one stage is available as a {{key}} variable in the next stage.
      */
     #[Test]
     public function execute_chainedStagesPassContextForward(): void
     {
-        $this->writeWorkflow("chained", [
+        $this->writeWorkflow("default", [
             "stages" => [
                 [
                     "skill" => "stage_one",
@@ -166,7 +257,11 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("stage_one", ["input" => "Hello"], [])
+            ->with(
+                "stage_one",
+                ["input" => "Can AI models be deployed on-premises?"],
+                [],
+            )
             ->andReturn("World");
 
         $this->executor
@@ -175,22 +270,25 @@ class JsonWorkflowExecutorTest extends TestCase
             ->with("stage_two", ["input" => "World"], [])
             ->andReturn("Done");
 
-        $result = $this->sut->execute("chained", ["title" => "Hello"]);
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
 
-        $this->assertSame("Done", $result);
+        $this->assertSame(
+            ["text" => "Done"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
     }
 
     /**
-     * The "skill" field should support {{key}} interpolation, allowing
-     * dynamic skill resolution from context (e.g. track-specific skills).
+     * The "skill" field should support {{key}} interpolation from context.
      */
     #[Test]
     public function execute_resolvesDynamicSkillKeyFromContext(): void
     {
-        $this->writeWorkflow("dynamic_skill", [
+        $this->writeWorkflow("default", [
             "stages" => [
                 [
-                    "skill" => "{{track_key}}.core_writing.hook_writer",
+                    "skill" => "{{domain}}.core_writing.hook_writer",
                     "variables" => [],
                     "options" => [],
                     "output_key" => "result",
@@ -201,14 +299,172 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("developer_docs.core_writing.hook_writer", [], [])
+            ->with("blog.com.core_writing.hook_writer", [], [])
             ->andReturn("Hook content");
 
-        $result = $this->sut->execute("dynamic_skill", [
-            "track_key" => "developer_docs",
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
+
+        $this->assertSame(
+            ["text" => "Hook content"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // execute() — context building
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * The context passed to the executor should contain all expected keys
+     * derived from the structure and the track.
+     */
+    #[Test]
+    public function execute_builds_context_from_structure_and_track(): void
+    {
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "context_checker",
+                    "variables" => [
+                        "domain" => "{{domain}}",
+                        "context" => "{{context}}",
+                        "type" => "{{type}}",
+                        "lang" => "{{lang}}",
+                        "template" => "{{template}}",
+                        "track" => "{{track}}",
+                        "track_type" => "{{track_type}}",
+                        "workflow" => "{{workflow}}",
+                        "description" => "{{description}}",
+                    ],
+                    "options" => [],
+                    "output_key" => "result",
+                ],
+            ],
         ]);
 
-        $this->assertSame("Hook content", $result);
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->withArgs(function (string $skill, array $vars): bool {
+                return $vars["domain"] === "blog.com" &&
+                    $vars["context"] === "This for marketing" &&
+                    $vars["type"] === "blog" &&
+                    $vars["lang"] === "en" &&
+                    $vars["template"] === "social" &&
+                    $vars["track"] === "social_media" &&
+                    $vars["track_type"] === "social" &&
+                    $vars["workflow"] === "default" &&
+                    $vars["description"] === "Test description";
+            })
+            ->andReturn("OK");
+
+        $structure = $this->buildStructure();
+        $this->sut->execute($structure);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // execute() — multi-track iteration
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * With two tracks, the executor should be called once per track and
+     * workflow_results should contain entries for both.
+     */
+    #[Test]
+    public function execute_iterates_all_tracks(): void
+    {
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "writer",
+                    "variables" => ["domain" => "{{domain}}"],
+                    "options" => [],
+                    "output_key" => "out",
+                ],
+            ],
+        ]);
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->with("writer", ["domain" => "blog.com"], [])
+            ->andReturn("Blog output");
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->with("writer", ["domain" => "meeting.com"], [])
+            ->andReturn("Meeting output");
+
+        $structure = $this->buildStructure([
+            "blog.com" => [
+                "blog-en" => $this->buildTrack(
+                    "blog.com",
+                    "blog",
+                    "blog-en",
+                    "This for marketing",
+                ),
+            ],
+            "meeting.com" => [
+                "meeting-en" => $this->buildTrack(
+                    "meeting.com",
+                    "meeting",
+                    "meeting-en",
+                    "This for security",
+                ),
+            ],
+        ]);
+
+        $result = $this->sut->execute($structure);
+
+        $this->assertCount(2, $result["workflow_results"]);
+        $this->assertSame(
+            ["text" => "Blog output"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
+        $this->assertSame(
+            ["text" => "Meeting output"],
+            $result["workflow_results"]["meeting.com"]["meeting-en"],
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // execute() — transforms
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * A stage with "transform": "strip_code_fence" should have the transform
+     * applied before storing in context.
+     */
+    #[Test]
+    public function execute_appliesStripCodeFenceTransform(): void
+    {
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "json_generator",
+                    "variables" => [],
+                    "options" => [],
+                    "output_key" => "clean_json",
+                    "transform" => "strip_code_fence",
+                ],
+            ],
+        ]);
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn("```json\n[\"a\", \"b\"]\n```");
+
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
+
+        // After strip_code_fence: '["a", "b"]' → json_decode → array
+        $this->assertSame(
+            ["a", "b"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -217,15 +473,24 @@ class JsonWorkflowExecutorTest extends TestCase
 
     /**
      * A loop stage should iterate over the source array, execute sub-stages
-     * for each item, and accumulate results into the configured key.
-     * Since the last stage is a loop (no top-level output_key), the return
-     * value comes from the accumulate key.
+     * for each item, and accumulate results. Since the last stage is a loop,
+     * the return value comes from the accumulate key.
+     *
+     * The accumulated string is not valid JSON, so production wraps it in
+     * ["text" => $raw].
      */
     #[Test]
     public function execute_loopStageIteratesAndAccumulates(): void
     {
-        $this->writeWorkflow("loop_test", [
+        $this->writeWorkflow("default", [
             "stages" => [
+                [
+                    "id" => "get_sections",
+                    "skill" => "section_generator",
+                    "variables" => [],
+                    "options" => [],
+                    "output_key" => "sections",
+                ],
                 [
                     "id" => "loop",
                     "type" => "loop",
@@ -247,311 +512,180 @@ class JsonWorkflowExecutorTest extends TestCase
             ],
         ]);
 
-        $this->executor
-            ->shouldReceive("execute")
-            ->twice()
-            ->ordered()
-            ->andReturnUsing(
-                fn(
-                    string $skill,
-                    array $vars,
-                ) => "Content for {$vars["section"]}",
-            );
-
-        $result = $this->sut->execute("loop_test", [
-            "sections" => ["Intro", "Conclusion"],
-        ]);
-
-        $this->assertSame(
-            "## Intro\nContent for Intro## Conclusion\nContent for Conclusion",
-            $result,
-        );
-    }
-
-    /**
-     * A loop stage whose source is a JSON string (produced by a prior
-     * linear stage) should decode it into an array before iterating.
-     */
-    #[Test]
-    public function execute_loopDecodesJsonStringSource(): void
-    {
-        $this->writeWorkflow("json_loop", [
-            "stages" => [
-                [
-                    "id" => "get_sections",
-                    "skill" => "section_generator",
-                    "variables" => [],
-                    "options" => [],
-                    "output_key" => "raw_sections",
-                ],
-                [
-                    "id" => "loop",
-                    "type" => "loop",
-                    "source" => "{{raw_sections}}",
-                    "item_key" => "section",
-                    "stages" => [
-                        [
-                            "skill" => "writer",
-                            "variables" => ["section" => "{{section}}"],
-                            "options" => [],
-                            "output_key" => "out",
-                        ],
-                    ],
-                    "accumulate" => [
-                        "key" => "body",
-                        "template" => "{{section}}: {{out}}",
-                    ],
-                ],
-            ],
-        ]);
-
+        // First call: section_generator (returns JSON string of sections)
         $this->executor
             ->shouldReceive("execute")
             ->once()
             ->with("section_generator", [], [])
-            ->andReturn('["Alpha", "Beta"]');
+            ->andReturn(json_encode(["Intro", "Conclusion"]));
 
+        // Second + third calls: loop sub-stages (one per item)
         $this->executor
             ->shouldReceive("execute")
             ->twice()
-            ->andReturnUsing(
-                fn(string $skill, array $vars) => "Wrote {$vars["section"]}",
-            );
+            ->andReturnUsing(function (string $skill, array $vars): string {
+                $section = $vars["section"] ?? "unknown";
+                return "Content for {$section}";
+            });
 
-        $result = $this->sut->execute("json_loop", []);
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
 
-        $this->assertSame("Alpha: Wrote AlphaBeta: Wrote Beta", $result);
+        // Production wraps non-JSON string output in ["text" => ...]
+        $this->assertSame(
+            [
+                "text" =>
+                    "## Intro\nContent for Intro## Conclusion\nContent for Conclusion",
+            ],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // execute() — transforms (integration-level)
+    // execute() — persistence to disk
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * A stage with "transform": "strip_code_fence" should have the transform
-     * applied to the executor's output before storing in context. The final
-     * return value reflects the transformed (fence-stripped) string.
+     * When content_path_markdown is set, the output text should be written
+     * to that file.
      */
     #[Test]
-    public function execute_appliesStripCodeFenceTransform(): void
+    public function execute_persists_markdown_to_content_path(): void
     {
-        $this->writeWorkflow("transform_test", [
-            "stages" => [
-                [
-                    "skill" => "json_generator",
-                    "variables" => [],
-                    "options" => [],
-                    "output_key" => "clean_json",
-                    "transform" => "strip_code_fence",
-                ],
-            ],
-        ]);
+        $mdPath = "{$this->contentDir}/output.md";
+        file_put_contents($mdPath, "");
 
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->andReturn("```json\n[\"a\", \"b\"]\n```");
-
-        $result = $this->sut->execute("transform_test", []);
-
-        $this->assertSame('["a", "b"]', $result);
-    }
-
-    /**
-     * A stage with "transform": "json_decode" should decode the output into
-     * a PHP array. A subsequent stage referencing {{decoded}} should receive
-     * the JSON-encoded string (TemplateResolver serialises arrays to JSON).
-     */
-    #[Test]
-    public function execute_appliesJsonDecodeTransform(): void
-    {
-        $this->writeWorkflow("json_decode_test", [
-            "stages" => [
-                [
-                    "skill" => "json_generator",
-                    "variables" => [],
-                    "options" => [],
-                    "output_key" => "decoded",
-                    "transform" => "json_decode",
-                ],
-                [
-                    "skill" => "formatter",
-                    "variables" => ["data" => "{{decoded}}"],
-                    "options" => [],
-                    "output_key" => "result",
-                ],
-            ],
-        ]);
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with("json_generator", [], [])
-            ->andReturn('{"key": "value"}');
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with("formatter", ["data" => '{"key":"value"}'], [])
-            ->andReturn('{"key":"value"}');
-
-        $result = $this->sut->execute("json_decode_test", []);
-
-        $this->assertSame('{"key":"value"}', $result);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // execute() — persistence
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * When a "persist" block is defined, the persistence service should be
-     * called with resolved path, filename, and content read from the
-     * output_key (defaults to "final_output").
-     */
-    #[Test]
-    public function execute_persistsFinalOutputWhenConfigured(): void
-    {
-        $this->writeWorkflow("persist_test", [
-            "stages" => [
-                [
-                    "skill" => "final_writer",
-                    "variables" => ["content" => "{{title}}"],
-                    "options" => [],
-                    "output_key" => "final_output",
-                ],
-            ],
-            "persist" => [
-                "path" => "{{domain_dir}}",
-                "filename" => "{{title_slug}}.md",
-            ],
-        ]);
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->andReturn("Final markdown content");
-
-        $this->persistence
-            ->shouldReceive("setPath")
-            ->once()
-            ->with("/output/articles");
-
-        $this->persistence
-            ->shouldReceive("saveMarkdown")
-            ->once()
-            ->with("Final markdown content", "my-article.md")
-            ->andReturn("");
-
-        $this->sut->execute("persist_test", [
-            "title" => "My Article",
-            "title_slug" => "my-article",
-            "domain_dir" => "/output/articles",
-        ]);
-    }
-
-    /**
-     * When no "persist" block is defined, the persistence service should
-     * not be called at all.
-     */
-    #[Test]
-    public function execute_doesNotPersistWhenNoPersistBlock(): void
-    {
-        $this->writeWorkflow("no_persist", [
+        $this->writeWorkflow("default", [
             "stages" => [
                 [
                     "skill" => "writer",
                     "variables" => [],
                     "options" => [],
-                    "output_key" => "result",
+                    "output_key" => "final_output",
+                ],
+            ],
+        ]);
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn("# My Article\n\nContent here.");
+
+        $structure = $this->buildStructure();
+        $structure["tracks"]["blog.com"]["blog-en"][
+            "content_path_markdown"
+        ] = $mdPath;
+
+        $this->sut->execute($structure);
+
+        $this->assertFileExists($mdPath);
+        $this->assertSame(
+            "# My Article\n\nContent here.",
+            file_get_contents($mdPath),
+        );
+    }
+
+    /**
+     * When content_path_json is set and the file exists, the output should
+     * be merged into the JSON under the "content" key.
+     *
+     * NOTE: SkillExecutorInterface::execute() returns string, so the mock
+     * must return a JSON-encoded string (not an array).
+     */
+    #[Test]
+    public function execute_persists_json_to_content_path(): void
+    {
+        $jsonPath = "{$this->contentDir}/content.json";
+        file_put_contents(
+            $jsonPath,
+            json_encode([
+                ["content" => ["uuid" => "abc", "domain" => "blog.com"]],
+            ]),
+        );
+
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "writer",
+                    "variables" => [],
+                    "options" => [],
+                    "output_key" => "final_output",
+                ],
+            ],
+        ]);
+
+        // Must return a STRING (interface return type is string).
+        // The production code json_decodes it if valid JSON.
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->andReturn('{"text":"JSON content"}');
+
+        $structure = $this->buildStructure();
+        $structure["tracks"]["blog.com"]["blog-en"][
+            "content_path_json"
+        ] = $jsonPath;
+
+        $this->sut->execute($structure);
+
+        $data = json_decode((string) file_get_contents($jsonPath), true);
+        // Production json_decodes the string result → array → stored as "content"
+        $this->assertSame(["text" => "JSON content"], $data["content"]);
+    }
+
+    /**
+     * When content_path_markdown is empty, no file should be written.
+     */
+    #[Test]
+    public function execute_does_not_persist_markdown_when_path_empty(): void
+    {
+        $this->writeWorkflow("default", [
+            "stages" => [
+                [
+                    "skill" => "writer",
+                    "variables" => [],
+                    "options" => [],
+                    "output_key" => "final_output",
                 ],
             ],
         ]);
 
         $this->executor->shouldReceive("execute")->once()->andReturn("Output");
 
-        $this->persistence->shouldNotReceive("setPath");
-        $this->persistence->shouldNotReceive("saveMarkdown");
+        $structure = $this->buildStructure();
+        $structure["tracks"]["blog.com"]["blog-en"]["content_path_markdown"] =
+            "";
 
-        $this->sut->execute("no_persist", []);
+        $this->sut->execute($structure);
+
+        // No assertion needed — just verify no exception was thrown.
+        $this->assertTrue(true);
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // execute() — definition loading (integration with WorkflowDefinitionLoader)
+    // execute() — definition loading
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * When OVERLAY_WORKFLOWS is set and the file exists there, the overlay
-     * version should be used (highest priority over the default directory).
+     * When the workflow file is not found and no blog_post.json fallback
+     * exists, a RuntimeException should be thrown.
      */
     #[Test]
-    public function execute_prefersOverlayDefinitionOverDefault(): void
+    public function execute_throwsWhenDefinitionNotFound(): void
     {
-        $overlayWorkflow = [
-            "stages" => [
-                [
-                    "skill" => "overlay_skill",
-                    "variables" => [],
-                    "options" => [],
-                    "output_key" => "out",
-                ],
-            ],
-        ];
-        $defaultWorkflow = [
-            "stages" => [
-                [
-                    "skill" => "default_skill",
-                    "variables" => [],
-                    "options" => [],
-                    "output_key" => "out",
-                ],
-            ],
-        ];
+        $structure = $this->buildStructure();
+        $structure["tracks"]["blog.com"]["blog-en"]["workflow"] =
+            "nonexistent_wf";
 
-        $relativeOverlay = "storage/test_wf_overlay_" . uniqid();
-        $absoluteOverlay = base_path($relativeOverlay);
-        mkdir($absoluteOverlay, 0755, true);
-
-        file_put_contents(
-            $absoluteOverlay . "/my_wf.json",
-            json_encode($overlayWorkflow),
-        );
-        file_put_contents(
-            $this->definitionsDir . "/my_wf.json",
-            json_encode($defaultWorkflow),
-        );
-
-        $this->setEnv("OVERLAY_WORKFLOWS", $relativeOverlay);
-
-        $this->executor
-            ->shouldReceive("execute")
-            ->once()
-            ->with("overlay_skill", [], [])
-            ->andReturn("from overlay");
-
-        $result = $this->sut->execute("my_wf", []);
-        $this->assertSame("from overlay", $result);
-
-        $this->removeDirectory($absoluteOverlay);
-    }
-
-    /**
-     * When the workflow file is not found in any directory and no
-     * default.json exists, a RuntimeException should be thrown with a
-     * message listing all searched paths.
-     */
-    #[Test]
-    public function execute_throwsWhenDefinitionNotFoundAnywhere(): void
-    {
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage("Workflow definition not found");
 
-        $this->sut->execute("nonexistent_workflow", []);
+        $this->sut->execute($structure);
     }
 
     /**
      * When the workflow file contains invalid JSON, a RuntimeException
-     * should be thrown with the JSON error message.
+     * should be thrown.
      */
     #[Test]
     public function execute_throwsOnInvalidJson(): void
@@ -561,10 +695,80 @@ class JsonWorkflowExecutorTest extends TestCase
             "{invalid json here",
         );
 
+        $structure = $this->buildStructure();
+        $structure["tracks"]["blog.com"]["blog-en"]["workflow"] = "broken";
+
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage("Invalid JSON");
 
-        $this->sut->execute("broken", []);
+        $this->sut->execute($structure);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // execute() — config override for definitions
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * When pnc.workflows.override_dir is set (as a RELATIVE path) and the
+     * file exists there, it should be preferred over the default dir.
+     *
+     * NOTE: Production resolves the override via base_path($configOverride),
+     * so the config value must be relative.
+     */
+    #[Test]
+    public function execute_prefersConfigOverrideDefinition(): void
+    {
+        // Use a relative path — production resolves it via base_path()
+        $overrideRelative = "test_wf_override_" . uniqid();
+        $overrideAbsolute = base_path($overrideRelative);
+        mkdir($overrideAbsolute, 0755, true);
+
+        file_put_contents(
+            $overrideAbsolute . "/default.json",
+            json_encode([
+                "stages" => [
+                    [
+                        "skill" => "override_skill",
+                        "variables" => [],
+                        "options" => [],
+                        "output_key" => "out",
+                    ],
+                ],
+            ]),
+        );
+
+        file_put_contents(
+            $this->definitionsDir . "/default.json",
+            json_encode([
+                "stages" => [
+                    [
+                        "skill" => "default_skill",
+                        "variables" => [],
+                        "options" => [],
+                        "output_key" => "out",
+                    ],
+                ],
+            ]),
+        );
+
+        // Set the config to the RELATIVE path
+        config()->set("pnc.workflows.override_dir", $overrideRelative);
+
+        $this->executor
+            ->shouldReceive("execute")
+            ->once()
+            ->with("override_skill", [], [])
+            ->andReturn("from override");
+
+        $structure = $this->buildStructure();
+        $result = $this->sut->execute($structure);
+
+        $this->assertSame(
+            ["text" => "from override"],
+            $result["workflow_results"]["blog.com"]["blog-en"],
+        );
+
+        $this->removeDirectory($overrideAbsolute);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -572,10 +776,75 @@ class JsonWorkflowExecutorTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Write a workflow definition JSON file to the default definitions dir.
+     * Build a standard test structure with one or two tracks.
      *
-     * @param string $name Workflow name (filename without .json).
-     * @param array  $data Workflow definition array.
+     * @param array|null $tracks Custom tracks array. If null, uses a single blog.com track.
+     */
+    private function buildStructure(?array $tracks = null): array
+    {
+        if ($tracks === null) {
+            $tracks = [
+                "blog.com" => [
+                    "blog-en" => $this->buildTrack(
+                        "blog.com",
+                        "blog",
+                        "blog-en",
+                        "This for marketing",
+                    ),
+                ],
+            ];
+        }
+
+        return [
+            "uuid" => "test-uuid-123",
+            "title" => "Can AI models be deployed on-premises?",
+            "title_slug" => "can_ai_models_be_deployed_on_premises",
+            "description" => "Test description",
+            "categories" => ["AI", "LLMs"],
+            "domain_dir" => $this->contentDir,
+            "assets_dir" => "{$this->contentDir}/assets",
+            "research_dir" => "{$this->contentDir}/research",
+            "tracks" => $tracks,
+        ];
+    }
+
+    /**
+     * Build a single track entry with all 18 documented fields.
+     */
+    private function buildTrack(
+        string $domain,
+        string $type,
+        string $trackKey,
+        string $context,
+    ): array {
+        $domainSlug = \Illuminate\Support\Str::slug($domain, "_");
+        $typeSlug = \Illuminate\Support\Str::slug($type, "_");
+        $lang = explode("-", $trackKey)[1] ?? "en";
+
+        return [
+            "uuid" => "test-uuid-123",
+            "title" => "Can AI models be deployed on-premises?",
+            "categories" => ["AI", "LLMs"],
+            "workflow" => "default",
+            "lang" => $lang,
+            "domain" => $domain,
+            "context" => $context,
+            "type" => $type,
+            "template" => "social",
+            "track" => "social_media",
+            "track_type" => "social",
+            "content_json" => "",
+            "content_path_json" => "",
+            "content_html" => "",
+            "content_path_html" => "",
+            "content_markdown" => "",
+            "content_path_markdown" => "",
+            "content_description" => "",
+        ];
+    }
+
+    /**
+     * Write a workflow definition JSON file to the default definitions dir.
      */
     private function writeWorkflow(string $name, array $data): void
     {
@@ -609,25 +878,5 @@ class JsonWorkflowExecutorTest extends TestCase
         }
 
         rmdir($dir);
-    }
-
-    /**
-     * Set an environment variable in all locations Laravel's env() reads from
-     * ($_ENV, $_SERVER, and the process environment).
-     */
-    private function setEnv(string $key, string $value): void
-    {
-        $_ENV[$key] = $value;
-        $_SERVER[$key] = $value;
-        putenv("{$key}={$value}");
-    }
-
-    /**
-     * Unset an environment variable from all locations.
-     */
-    private function unsetEnv(string $key): void
-    {
-        unset($_ENV[$key], $_SERVER[$key]);
-        putenv($key);
     }
 }

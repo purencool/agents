@@ -30,7 +30,9 @@ class AgentDataService implements AgentDataServiceInterface
         protected ResearchAgentContentAction $researchAction,
         protected WorkFlowAgentContentAction $workFlowAction,
         protected TemplateAgentContentAction $templateAction,
-    ) {}
+    ) {
+        //
+    }
 
     /**
      * Verifies and generates the agent filesystem hierarchy.
@@ -57,26 +59,7 @@ class AgentDataService implements AgentDataServiceInterface
      *
      * @param array $structure Return value from {@see self::createStructure()}.
      *
-     * @return array{
-     *     uuid: string,
-     *     domain_dir: string,
-     *     assets_dir: string,
-     *     research_dir: string,
-     *     title: string,
-     *     title_slug: string,
-     *     tracks: array<string, array{
-     *         domain: string,
-     *         type: string,
-     *         template: string,
-     *         track: string,
-     *         track_type: string,
-     *         workflow: string,
-     *         lang: string,
-     *         content_json: string,
-     *         content_md: string,
-     *         description_md: string,
-     *         research_text: string
-     *     }>
+     * @return array $structure Return value from {@see self::createStructure()}.
      */
     public function runResearch(array $structure): array
     {
@@ -119,9 +102,37 @@ class AgentDataService implements AgentDataServiceInterface
      * @return array{
      *     structure: array{
      *         uuid: string,
-     *         paths: array<string, string>,
-     *         tracks: array<string, array>
-     *     }
+     *         title: string,
+     *         title_slug: string,
+     *         description: string,
+     *         categories: string[],
+     *         domain_dir: string,
+     *         assets_dir: string,
+     *         research_dir: string,
+     *         tracks: array<string, array<string, array{
+     *             uuid: string,
+     *             title: string,
+     *             categories: string[],
+     *             workflow: string,
+     *             lang: string,
+     *             domain: string,
+     *             context: string,
+     *             type: string,
+     *             template: string,
+     *             track: string,
+     *             track_type: string,
+     *             content_json: string,
+     *             content_path_json: string,
+     *             content_html: string,
+     *             content_path_html: string,
+     *             content_markdown: string,
+     *             content_path_markdown: string,
+     *             content_description: string
+     *         }>>
+     *     },
+     *     research: array,
+     *     work_flow: string,
+     *     template: array,
      * } Combined results from all pipeline stages.
      *
      * @todo Uncomment and wire up remaining stages (workflow, template, save).
@@ -133,9 +144,9 @@ class AgentDataService implements AgentDataServiceInterface
         // This needs to be add to the research json object.
         $research = $this->runResearch($structure);
         $workflow = $this->runWorkFlow($structure);
-        dd($workflow);
-        $template = $this->applyTemplate($workflow);
 
+        $template = $this->applyTemplate($workflow);
+        //  dd($template);
         return [
             "structure" => $structure,
             "research" => $research,
