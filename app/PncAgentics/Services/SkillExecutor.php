@@ -102,13 +102,23 @@ class SkillExecutor implements SkillExecutorInterface
         }
 
         $filePath = $this->resolveFilePath($skillKey);
-        $rawSystemInstructions = $this->loadFileContent($filePath);
+        $skillData = json_decode($this->loadFileContent($filePath), true);
+
+        if (!is_array($skillData)) {
+            throw new \RuntimeException(
+                "Invalid skill file (not valid JSON): {$filePath}",
+            );
+        }
 
         return $this->processLLMCall(
             $skillKey,
             [
-                "name" => basename($skillKey),
-                "system_instructions" => $rawSystemInstructions,
+                "name" => $skillData["name"] ?? basename($skillKey),
+                "system_instructions" =>
+                    $skillData["system_instructions"] ?? "",
+                "model" => $skillData["model"] ?? null,
+                "temperature" => $skillData["temperature"] ?? null,
+                "token_limits" => $skillData["token_limits"] ?? null,
             ],
             $filePath,
             $variables,
@@ -331,10 +341,7 @@ class SkillExecutor implements SkillExecutorInterface
             $variables,
         );
 
-        $promptPayload = $this->buildPromptPayload(
-            $compiledInstructions,
-            $variables,
-        );
+        $promptPayload = $this->buildPromptPayload($variables);
 
         $temperature = isset($options["temperature"])
             ? (float) $options["temperature"]
@@ -428,14 +435,9 @@ class SkillExecutor implements SkillExecutorInterface
      *
      * @return string The complete three-section prompt payload.
      */
-    protected function buildPromptPayload(
-        string $instructions,
-        array $variables,
-    ): string {
-        $payload =
-            "=== SYSTEM ROLE & SKILL PROTOCOLS ===\n" .
-            trim($instructions) .
-            "\n\n=== CONTEXTUAL DATA WORKSPACE ===\n";
+    protected function buildPromptPayload(array $variables): string
+    {
+        $payload = "=== CONTEXTUAL DATA WORKSPACE ===\n";
 
         foreach ($variables as $key => $value) {
             $payload .=

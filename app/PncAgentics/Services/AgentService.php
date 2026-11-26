@@ -100,11 +100,9 @@ class AgentService implements AgentServiceInterface
         $prompts = $this->extractPrompts($request, "complete");
 
         if ($this->isDisabled()) {
-            return $this->buildDebugResponse(
-                $prompts["system_prompt"],
-                $prompts["user_prompt"],
-                "one-shot",
-            );
+            $skill = $request["metadata"]["skill_executed"] ?? "unknown";
+            $sysPreview = mb_substr($request["system_prompt"], 0, 120);
+            return "[DEBUG] {$skill}\n  sys: {$sysPreview}...";
         }
 
         $agent = $this->createAgent();
@@ -169,11 +167,7 @@ class AgentService implements AgentServiceInterface
         $threadId = $request["thread_id"] ?? "default";
 
         if ($this->isDisabled()) {
-            return $this->buildDebugResponse(
-                $prompts["system_prompt"],
-                $prompts["user_prompt"],
-                $threadId,
-            );
+            return "[DEBUG] chat ({$threadId}) — pipeline OK, no LLM call made.";
         }
 
         $agent = $this->createAgent();
@@ -361,14 +355,19 @@ class AgentService implements AgentServiceInterface
         string $userPrompt,
         string $threadId = "one-shot",
     ): string {
-        return sprintf(
-            "You are in debug mode. A request was made to the AI service.\n\n" .
-                "--- THREAD ID ---\n%s\n\n" .
-                "--- SYSTEM PROMPT ---\n%s\n\n" .
-                "--- USER PROMPT ---\n%s",
-            $threadId,
-            $systemPrompt,
-            $userPrompt,
-        );
+        $sep = str_repeat("=", 60);
+
+        return <<<LOG
+        {$sep}
+        DEBUG MODE — AI Request
+        Thread: {$threadId}
+        {$sep}
+        [SYSTEM PROMPT]
+        {$systemPrompt}
+        {$sep}
+        [USER PROMPT]
+        {$userPrompt}
+        {$sep}
+        LOG;
     }
 }

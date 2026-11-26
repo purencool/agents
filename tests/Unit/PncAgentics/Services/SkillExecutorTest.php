@@ -31,7 +31,13 @@ use Tests\TestCase;
  *  - loadFileContent(): static caching behaviour.
  *  - parsePlaceholders(): scalar replacement, non-scalar passthrough,
  *    unmatched placeholder preservation.
- *  - buildPromptPayload(): three-section structure, array/object rendering.
+ *  - buildPromptPayload(): contextual data workspace + execution run sections,
+ *    array/object JSON rendering.
+ *
+ * Prompt architecture (post-refactor):
+ *  - system_prompt: Compiled skill instructions (placeholders resolved).
+ *  - user_prompt:   Contextual data workspace + execution run instruction only.
+ *                   Does NOT contain the system instructions.
  *
  * The AgentServiceInterface is mocked. Fixture skill files are created in a
  * temporary directory and cleaned up in tearDown.
@@ -71,8 +77,9 @@ class SkillExecutorTest extends TestCase
 
     /**
      * processLLMCall() should compile placeholders in system_instructions,
-     * build the three-section prompt payload, and delegate to the agent
-     * service with the correct structured request.
+     * build the user prompt payload (contextual data only, no system
+     * instructions), and delegate to the agent service with the correct
+     * structured request.
      */
     #[Test]
     public function processLLMCall_compilesTemplateAndCallsAiService(): void
@@ -82,11 +89,21 @@ class SkillExecutorTest extends TestCase
             ->method("complete")
             ->with(
                 $this->callback(function (array $request): bool {
+                    // System prompt should contain the resolved instructions
                     return str_contains(
                         $request["system_prompt"],
                         "Greet Alice",
                     ) &&
-                        str_contains($request["user_prompt"], "Greet Alice") &&
+                        // User prompt should contain the variable in the data workspace
+                        str_contains(
+                            $request["user_prompt"],
+                            "Variable [name]: Alice",
+                        ) &&
+                        // User prompt should NOT contain the system instructions
+                        !str_contains(
+                            $request["user_prompt"],
+                            "You are a helpful assistant",
+                        ) &&
                         $request["temperature"] === 0.7 &&
                         $request["max_tokens"] === 512;
                 }),
@@ -283,35 +300,80 @@ class SkillExecutorTest extends TestCase
     // ─────────────────────────────────────────────────────────────────────
 
     #[Test]
-    public function resolveFilePath_convertsSkillsSuffixToSkillsMdExtension(): void
+    public function resolveFilePath_convertsSkillsSuffixToSkillsJsonExtension(): void
     {
-        $dir = $this->tempDir . "/track/core_writing/body_content";
-        mkdir($dir, 0755, true);
-        $filePath = $dir . "/topic_sentence_opener.skills.md";
-        file_put_contents($filePath, "content");
+        $method = new \ReflectionMethod(
+            SkillExecutor::class,
+            "resolveFilePath",
+        );
+        $method->setAccessible(true);
 
-        $expectedRelative =
-            "track" .
-            DIRECTORY_SEPARATOR .
-            "core_writing" .
-            DIRECTORY_SEPARATOR .
-            "body_content" .
-            DIRECTORY_SEPARATOR .
-            "topic_sentence_opener.skills.md";
+        // Create the expected file at the fallback path
+        $relativePath =
+            "track/core_writing/body_content/topic_sentence_opener.skills.json";
+        $fallbackDir = app_path("PncAgentics/Skills");
+        $fullPath =
+            $fallbackDir .
+            "/" .
+            str_replace("/", DIRECTORY_SEPARATOR, $relativePath);
+        $dir = dirname($fullPath);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        file_put_contents(
+            $fullPath,
+            json_encode(["name" => "test", "system_instructions" => "x"]),
+        );
 
-        $this->assertFileExists($filePath);
-        $this->assertStringEndsWith($expectedRelative, $filePath);
+        $result = $method->invoke(
+            $this->executor,
+            "track.core_writing.body_content.topic_sentence_opener.skills",
+        );
+
+        $this->assertFileExists($result);
+        $this->assertStringEndsWith(
+            "topic_sentence_opener.skills.json",
+            $result,
+        );
+
+        // Cleanup
+        unlink($fullPath);
     }
 
     #[Test]
-    public function resolveFilePath_convertsPlainKeyToMdExtension(): void
+    public function resolveFilePath_convertsPlainKeyToSkillsJsonExtension(): void
     {
-        $dir = $this->tempDir . "/track/core_writing";
-        mkdir($dir, 0755, true);
-        $filePath = $dir . "/my_skill.md";
-        file_put_contents($filePath, "content");
+        $method = new \ReflectionMethod(
+            SkillExecutor::class,
+            "resolveFilePath",
+        );
+        $method->setAccessible(true);
 
-        $this->assertFileExists($filePath);
+        $relativePath = "track/core_writing/my_skill.skills.json";
+        $fallbackDir = app_path("PncAgentics/Skills");
+        $fullPath =
+            $fallbackDir .
+            "/" .
+            str_replace("/", DIRECTORY_SEPARATOR, $relativePath);
+        $dir = dirname($fullPath);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        file_put_contents(
+            $fullPath,
+            json_encode(["name" => "test", "system_instructions" => "x"]),
+        );
+
+        $result = $method->invoke(
+            $this->executor,
+            "track.core_writing.my_skill",
+        );
+
+        $this->assertFileExists($result);
+        $this->assertStringEndsWith("my_skill.skills.json", $result);
+
+        // Cleanup
+        unlink($fullPath);
     }
 
     #[Test]
@@ -338,8 +400,11 @@ class SkillExecutorTest extends TestCase
     #[Test]
     public function loadFileContent_cachesResultInStaticProperty(): void
     {
-        $filePath = $this->tempDir . "/cached_skill.md";
-        file_put_contents($filePath, "original content");
+        $filePath = $this->tempDir . "/cached_skill.json";
+        file_put_contents(
+            $filePath,
+            '{"name":"test","system_instructions":"original"}',
+        );
 
         $method = new \ReflectionMethod(
             SkillExecutor::class,
@@ -348,11 +413,20 @@ class SkillExecutorTest extends TestCase
         $method->setAccessible(true);
 
         $firstCall = $method->invoke($this->executor, $filePath);
-        $this->assertSame("original content", $firstCall);
+        $this->assertSame(
+            '{"name":"test","system_instructions":"original"}',
+            $firstCall,
+        );
 
-        file_put_contents($filePath, "modified content");
+        file_put_contents(
+            $filePath,
+            '{"name":"test","system_instructions":"modified"}',
+        );
         $secondCall = $method->invoke($this->executor, $filePath);
-        $this->assertSame("original content", $secondCall);
+        $this->assertSame(
+            '{"name":"test","system_instructions":"original"}',
+            $secondCall,
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -424,8 +498,15 @@ class SkillExecutorTest extends TestCase
     // buildPromptPayload()
     // ─────────────────────────────────────────────────────────────────────
 
+    /**
+     * buildPromptPayload() should produce a two-section payload:
+     *  1. === CONTEXTUAL DATA WORKSPACE === (variables)
+     *  2. === EXECUTION RUN === (fixed instruction)
+     *
+     * It should NOT contain system instructions (those go in system_prompt).
+     */
     #[Test]
-    public function buildPromptPayload_includesAllThreeSections(): void
+    public function buildPromptPayload_includesDataWorkspaceAndExecutionRun(): void
     {
         $method = new \ReflectionMethod(
             SkillExecutor::class,
@@ -433,15 +514,12 @@ class SkillExecutorTest extends TestCase
         );
         $method->setAccessible(true);
 
-        $result = $method->invoke($this->executor, "Be a helpful writer.", [
+        $result = $method->invoke($this->executor, [
             "topic" => "PHP Testing",
+            "lang" => "en",
         ]);
 
-        $this->assertStringContainsString(
-            "=== SYSTEM ROLE & SKILL PROTOCOLS ===",
-            $result,
-        );
-        $this->assertStringContainsString("Be a helpful writer.", $result);
+        // Should contain the data workspace section
         $this->assertStringContainsString(
             "=== CONTEXTUAL DATA WORKSPACE ===",
             $result,
@@ -450,9 +528,26 @@ class SkillExecutorTest extends TestCase
             "Variable [topic]: PHP Testing",
             $result,
         );
+        $this->assertStringContainsString("Variable [lang]: en", $result);
+
+        // Should contain the execution run section
         $this->assertStringContainsString("=== EXECUTION RUN ===", $result);
+        $this->assertStringContainsString(
+            "Execute the task using the constraints defined above.",
+            $result,
+        );
+
+        // Should NOT contain system instructions section
+        $this->assertStringNotContainsString(
+            "=== SYSTEM ROLE & SKILL PROTOCOLS ===",
+            $result,
+        );
     }
 
+    /**
+     * buildPromptPayload() should render array values as pretty-printed JSON
+     * under a "Data Object [key]:" label.
+     */
     #[Test]
     public function buildPromptPayload_rendersArraysAsJson(): void
     {
@@ -462,7 +557,7 @@ class SkillExecutorTest extends TestCase
         );
         $method->setAccessible(true);
 
-        $result = $method->invoke($this->executor, "Instructions here.", [
+        $result = $method->invoke($this->executor, [
             "items" => ["apple", "banana"],
         ]);
 
@@ -471,6 +566,10 @@ class SkillExecutorTest extends TestCase
         $this->assertStringContainsString('"banana"', $result);
     }
 
+    /**
+     * buildPromptPayload() should render object values as JSON
+     * under a "Data Object [key]:" label.
+     */
     #[Test]
     public function buildPromptPayload_rendersObjectsAsJson(): void
     {
@@ -480,7 +579,7 @@ class SkillExecutorTest extends TestCase
         );
         $method->setAccessible(true);
 
-        $result = $method->invoke($this->executor, "Instructions here.", [
+        $result = $method->invoke($this->executor, [
             "config" => new \stdClass(),
         ]);
 
@@ -498,10 +597,13 @@ class SkillExecutorTest extends TestCase
         mkdir($baseDir, 0755, true);
 
         foreach ($agentNames as $name) {
-            $path = $baseDir . "/{$name}.skills.md";
+            $path = $baseDir . "/{$name}.skills.json";
             file_put_contents(
                 $path,
-                "# {$name} Protocol\n\nDo specific things.",
+                json_encode([
+                    "name" => $name,
+                    "system_instructions" => "# {$name} Protocol\n\nDo specific things.",
+                ]),
             );
         }
     }

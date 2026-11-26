@@ -16,22 +16,28 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Decorator that wraps a base SkillExecutor with audit logging.
+ * Decorator that wraps a base SkillExecutor with per-run audit logging.
  *
- * Adds the following around every execute() call:
- *  - Entry log with run ID, skill key, and variable keys.
- *  - Detailed prompt tree written to a dynamic AI audit log file.
- *  - Delegation to the wrapped base executor.
- *  - Success log with execution time.
- *  - Performance warning if execution exceeds 45 seconds.
- *  - Detailed response tree appended to the same audit log file.
- *  - Error log + re-throw on failure.
+ * For every execute() call this decorator:
+ *  1. Generates a unique run ID (UUID v4).
+ *  2. Writes a one-line START entry to the daily log channel.
+ *  3. Writes a formatted PROMPT INPUT block to a per-run audit log file.
+ *  4. Delegates to the wrapped base executor.
+ *  5. On success: writes a DONE entry + LLM RESPONSE block to the audit file.
+ *  6. On failure: writes a FAIL entry + ERROR OUTPUT block, then re-throws.
+ *  7. If execution exceeds 45 seconds, logs a performance warning.
  *
- * The audit log file path is resolved from the LOGGING env variable
- * (relative to base_path) or falls back to storage/logs/.
+ * Audit log file structure:
+ *   {base}/YYYY-MM-DD_Hi/{domain}/{runId}.log
  *
- * Environment variable:
- *  - LOGGING (string): Relative path for the AI audit log directory.
+ *   Where {base} is resolved from the LOGGING env variable (relative to
+ *   base_path) or falls back to storage/logs/.
+ *
+ * Example:
+ *   storage/logs/2026-11-25_2042/example.com/55bdde90-802d-4fcb-a4e0-21821219632a.log
+ *
+ * Environment variables:
+ *  - LOGGING (string): Relative path for the audit log base directory.
  */
 class AuditedSkillExecutor implements SkillExecutorInterface
 {
@@ -45,13 +51,14 @@ class AuditedSkillExecutor implements SkillExecutorInterface
     /**
      * Execute a skill with full audit logging.
      *
-     * Logs the entry, delegates to the base executor, then logs the
-     * result (or error) with timing information. Also writes detailed
-     * prompt/response trees to a file-based audit log.
+     * Lifecycle: START → PROMPT INPUT → [base executor] → DONE/FAIL → RESPONSE
      *
-     * @param string $skillKey   Unique identifier for the skill.
-     * @param array  $variables  Template variables to pass to the skill.
-     * @param array  $options    Execution options (temperature, max_tokens, etc.).
+     * @param string $skillKey  Unique dot-notation identifier for the skill.
+     * @param array  $variables Template variables passed to the skill.
+     * @param array  $options   Execution options. Must include "_domain" (string)
+     *                          for log directory organisation. Other keys
+     *                          (temperature, max_tokens) are forwarded to the
+     *                          base executor.
      *
      * @return string The result from the base executor.
      *
@@ -63,17 +70,33 @@ class AuditedSkillExecutor implements SkillExecutorInterface
         array $options = [],
     ): string {
         $runId = Str::uuid()->toString();
+        $domain = $options["_domain"] ?? "unknown";
         $startTime = microtime(true);
+        $startedAt = now()->toDateTimeString();
 
+        // ─── DAILY LOG: Entry ─────────────────────────────────────────────
         Log::channel("daily")->info(
-            "[AI Skill Init] Run ID: {$runId} | Skill: {$skillKey}",
+            "[AI] START | {$runId} | skill={$skillKey} | domain={$domain} | vars=" .
+                count($variables) .
+                " | " .
+                $startedAt,
             [
+                "run_id" => $runId,
+                "skill" => $skillKey,
+                "domain" => $domain,
                 "variables_keys" => array_keys($variables),
                 "options" => $options,
             ],
         );
 
-        $this->logDetailedPromptTree($runId, $skillKey, $variables);
+        // ─── AUDIT FILE: Prompt input ─────────────────────────────────────
+        $this->logDetailedPromptTree(
+            $runId,
+            $skillKey,
+            $variables,
+            $startedAt,
+            $domain,
+        );
 
         try {
             $result = $this->baseExecutor->execute(
@@ -83,32 +106,63 @@ class AuditedSkillExecutor implements SkillExecutorInterface
             );
 
             $executionTime = round(microtime(true) - $startTime, 2);
+            $finishedAt = now()->toDateTimeString();
 
+            // ─── DAILY LOG: Success ───────────────────────────────────────
             Log::channel("daily")->info(
-                "✅ [AI Skill Success] Run ID: {$runId} | Time: {$executionTime}s",
+                "[AI] DONE  | {$runId} | skill={$skillKey} | domain={$domain} | took={$executionTime}s | {$finishedAt}",
             );
 
             if ($executionTime > 45.0) {
                 Log::channel("daily")->warning(
-                    "🚨 [PERFORMANCE WARNING] Run ID: {$runId} | Skill [{$skillKey}] took abnormally long ({$executionTime}s). Verify your local GPU compute availability, context window allocation limits, or VRAM memory states.",
+                    "[AI] ⚠ SLOW  | {$runId} | skill={$skillKey} | domain={$domain} | took={$executionTime}s (threshold: 45s) | {$finishedAt}",
                     [
+                        "run_id" => $runId,
                         "skill" => $skillKey,
+                        "domain" => $domain,
                         "duration_seconds" => $executionTime,
                     ],
                 );
             }
 
-            $this->logDetailedResponseTree($runId, $skillKey, $result);
+            // ─── AUDIT FILE: Response ─────────────────────────────────────
+            $this->logDetailedResponseTree(
+                $runId,
+                $skillKey,
+                $result,
+                $executionTime,
+                $finishedAt,
+                false,
+                $domain,
+            );
 
             return $result;
         } catch (\Exception $e) {
             $executionTime = round(microtime(true) - $startTime, 2);
+            $failedAt = now()->toDateTimeString();
 
+            // ─── DAILY LOG: Failure ───────────────────────────────────────
             Log::channel("daily")->error(
-                "[AI Skill Failure] Run ID: {$runId} | Time: {$executionTime}s | Error: {$e->getMessage()}",
+                "[AI] FAIL  | {$runId} | skill={$skillKey} | domain={$domain} | took={$executionTime}s | error=\"{$e->getMessage()}\" | {$failedAt}",
                 [
+                    "run_id" => $runId,
+                    "skill" => $skillKey,
+                    "domain" => $domain,
+                    "exception" => $e::class,
+                    "message" => $e->getMessage(),
                     "trace" => $e->getTraceAsString(),
                 ],
+            );
+
+            // ─── AUDIT FILE: Error ────────────────────────────────────────
+            $this->logDetailedResponseTree(
+                $runId,
+                $skillKey,
+                "ERROR: " . $e->getMessage(),
+                $executionTime,
+                $failedAt,
+                true,
+                $domain,
             );
 
             throw $e;
@@ -116,102 +170,134 @@ class AuditedSkillExecutor implements SkillExecutorInterface
     }
 
     /**
-     * Resolve the dynamic AI audit log file path.
+     * Resolve the per-run audit log file path.
      *
-     * Reads the LOGGING env variable as a base_path-relative directory.
-     * Creates the directory if it doesn't exist. Falls back to
-     * storage/logs/ when the env variable is not set.
+     * Directory structure: {base}/YYYY-MM-DD_Hi/{domain}/{runId}.log
      *
-     * @return string Absolute path to today's audit log file.
+     * The base directory is read from the LOGGING env variable (resolved
+     * relative to base_path). Falls back to storage/logs/ when not set.
+     *
+     * @param string $runId  UUID for this execution run.
+     * @param string $domain The domain this run belongs to (used as directory name).
+     *
+     * @return string Absolute path to the audit log file for this run.
      */
-    protected function getDynamicLogPath(): string
+    protected function getDynamicLogPath(string $runId, string $domain): string
     {
-        $customLoggingBase = env("LOGGING");
+        $base = env("LOGGING")
+            ? base_path(env("LOGGING"))
+            : storage_path("logs");
 
-        if ($customLoggingBase) {
-            $basePathResolved = base_path($customLoggingBase);
+        $dir =
+            $base .
+            DIRECTORY_SEPARATOR .
+            now()->format("Y-m-d_Hi") .
+            DIRECTORY_SEPARATOR .
+            $domain;
 
-            if (!is_dir($basePathResolved)) {
-                mkdir($basePathResolved, 0755, true);
-            }
-
-            return $basePathResolved .
-                DIRECTORY_SEPARATOR .
-                "ai_audit_" .
-                now()->format("Y-m-d") .
-                ".log";
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
         }
 
-        return storage_path("logs/ai_audit_" . now()->format("Y-m-d") . ".log");
+        return $dir . DIRECTORY_SEPARATOR . "{$runId}.log";
     }
 
     /**
-     * Append the input variables to the audit log file.
+     * Write the formatted prompt input block to the per-run audit log file.
      *
-     * Writes a formatted block containing the run ID, skill key,
-     * timestamp, and all variable key/value pairs.
+     * Renders all template variables with proper indentation for
+     * multi-line values (arrays/objects are JSON pretty-printed).
      *
-     * @param string $runId      Unique execution run ID.
+     * @param string $runId      UUID for this execution run.
      * @param string $skillKey   The skill being executed.
-     * @param array  $variables  The template variables passed to the skill.
+     * @param array  $variables  Template variables passed to the skill.
+     * @param string $startedAt  Human-readable timestamp of the call.
+     * @param string $domain     Domain identifier (for file path).
      */
     protected function logDetailedPromptTree(
         string $runId,
         string $skillKey,
         array $variables,
+        string $startedAt,
+        string $domain,
     ): void {
-        $logPath = $this->getDynamicLogPath();
-        $divider = str_repeat("=", 80);
-        $timestamp = now()->toDateTimeString();
+        $logPath = $this->getDynamicLogPath($runId, $domain);
+        $bar = str_repeat("═", 72);
 
-        $logContent = <<<EOT
-        {$divider}
-        [{$timestamp}] [PROMPT INPUT] | RUN ID: {$runId} | SKILL: {$skillKey}
-        {$divider}
-        Variables Sent:
-        EOT;
+        $lines = [
+            "",
+            "┌{$bar}┐",
+            "│  📥 PROMPT INPUT",
+            "│  Time:    {$startedAt}",
+            "│  Run ID:  {$runId}",
+            "│  Skill:   {$skillKey}",
+            "│  Domain:  {$domain}",
+            "├{$bar}┤",
+            "│",
+        ];
 
         foreach ($variables as $key => $value) {
-            $formattedValue =
+            $formatted =
                 is_array($value) || is_object($value)
                     ? json_encode(
                         $value,
                         JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
                     )
-                    : $value;
-            $logContent .= "\n--> [{$key}]:\n{$formattedValue}\n";
+                    : (string) $value;
+
+            $lines[] = "│  ▸ {$key}:";
+            $lines[] = preg_replace("/^/m", "│    ", $formatted);
+            $lines[] = "│";
         }
 
-        $logContent .= "\n\n";
+        $lines[] = "└{$bar}┘";
+        $lines[] = "";
 
-        file_put_contents($logPath, $logContent, FILE_APPEND);
+        file_put_contents($logPath, implode("\n", $lines), FILE_APPEND);
     }
 
     /**
-     * Append the LLM response to the audit log file.
+     * Write the formatted LLM response (or error) block to the per-run audit log file.
      *
-     * @param string $runId      Unique execution run ID.
-     * @param string $skillKey   The skill that produced the response.
-     * @param string $result     The raw response text from the LLM.
+     * @param string $runId         UUID for this execution run.
+     * @param string $skillKey      The skill that produced the response.
+     * @param string $result        The raw response text (or error message).
+     * @param float  $executionTime Duration in seconds.
+     * @param string $finishedAt    Human-readable timestamp of completion.
+     * @param bool   $isError       Whether this block represents a failure.
+     * @param string $domain        Domain identifier (for file path).
      */
     protected function logDetailedResponseTree(
         string $runId,
         string $skillKey,
         string $result,
+        float $executionTime,
+        string $finishedAt,
+        bool $isError = false,
+        string $domain = "unknown",
     ): void {
-        $logPath = $this->getDynamicLogPath();
-        $divider = str_repeat("-", 80);
+        $logPath = $this->getDynamicLogPath($runId, $domain);
+        $bar = str_repeat("═", 72);
 
-        $logContent = <<<EOT
-        {$divider}
-        [RUN ID: {$runId}] [LLM RESPONSE OUTPUT] | SKILL: {$skillKey}
-        {$divider}
-        {$result}
-        ================================================================================
+        $icon = $isError ? "❌ ERROR OUTPUT" : "📤 LLM RESPONSE";
+        $status = $isError ? "FAILED" : "OK";
 
+        $lines = [
+            "┌{$bar}┐",
+            "│  {$icon}",
+            "│  Time:    {$finishedAt}",
+            "│  Run ID:  {$runId}",
+            "│  Skill:   {$skillKey}",
+            "│  Domain:  {$domain}",
+            "│  Status:  {$status} | Duration: {$executionTime}s",
+            "├{$bar}┤",
+            "│",
+            preg_replace("/^/m", "│  ", $result),
+            "│",
+            "└{$bar}┘",
+            "",
+        ];
 
-        EOT;
-
-        file_put_contents($logPath, $logContent, FILE_APPEND);
+        file_put_contents($logPath, implode("\n", $lines), FILE_APPEND);
     }
 }

@@ -9,7 +9,6 @@
 
 declare(strict_types=1);
 
-
 namespace Tests\Unit\PncAgentics\Services;
 
 use App\PncAgentics\Contracts\SkillExecutorInterface;
@@ -24,14 +23,19 @@ use Tests\TestCase;
  *
  * Verifies that execute():
  *  - Delegates to the base executor and returns its result.
- *  - Logs entry, success, and failure via the Log facade.
+ *  - Writes a START entry (2 args: message + context) to the daily log.
+ *  - Writes a DONE entry (1 arg: message only) on success.
+ *  - Writes a FAIL entry (2 args: message + context) on failure.
  *  - Triggers a performance warning when execution exceeds 45 seconds.
  *  - Re-throws exceptions from the base executor after logging.
- *  - Writes prompt and response trees to the audit log file.
+ *  - Writes PROMPT INPUT and LLM RESPONSE blocks to the per-run audit file.
  *
  * Also verifies getDynamicLogPath():
- *  - Uses the LOGGING env variable when set.
+ *  - Uses the LOGGING env variable (relative to base_path) when set.
  *  - Falls back to storage/logs/ when not set.
+ *  - Creates the {date_Hi}/{domain}/ directory structure.
+ *
+ * Audit file path format: {base}/YYYY-MM-DD_Hi/{domain}/{runId}.log
  */
 class AuditedSkillExecutorTest extends TestCase
 {
@@ -46,9 +50,14 @@ class AuditedSkillExecutorTest extends TestCase
     private Mockery\MockInterface $baseExecutor;
 
     /**
-     * Temporary directory for audit log file tests.
+     * Relative path for the LOGGING env variable (resolved via base_path in production).
      */
     private string $logDir;
+
+    /**
+     * Absolute path to the temporary log base directory (for assertions and file operations).
+     */
+    private string $logDirAbsolute;
 
     /**
      * Set up mocks, temp log directory, and the service.
@@ -57,11 +66,11 @@ class AuditedSkillExecutorTest extends TestCase
     {
         parent::setUp();
 
-        $this->logDir = sys_get_temp_dir() . "/pnc_audit_" . uniqid();
-        mkdir($this->logDir, 0755, true);
+        $this->logDir = "tmp/pnc_audit_" . uniqid();
+        $this->logDirAbsolute = base_path($this->logDir);
+        mkdir($this->logDirAbsolute, 0755, true);
 
         $this->baseExecutor = Mockery::mock(SkillExecutorInterface::class);
-
         $this->service = new AuditedSkillExecutor($this->baseExecutor);
     }
 
@@ -70,7 +79,7 @@ class AuditedSkillExecutorTest extends TestCase
      */
     protected function tearDown(): void
     {
-        $this->removeDirectory($this->logDir);
+        $this->removeDirectory($this->logDirAbsolute);
         putenv("LOGGING");
         Mockery::close();
         parent::tearDown();
@@ -79,58 +88,77 @@ class AuditedSkillExecutorTest extends TestCase
     // ─── execute() — happy path ────────────────────────────────────────────
 
     /**
-     * @testdoc Verify that execute() delegates to the base executor
-     *          and returns its result unchanged.
+     * Verify that execute() delegates to the base executor
+     * and returns its result unchanged.
      */
     #[Test]
     public function execute_delegates_to_base_executor_and_returns_result(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
+
+        $options = ["_domain" => "example.com", "temperature" => 0.5];
 
         $this->baseExecutor
             ->shouldReceive("execute")
             ->once()
-            ->with("test.skill", ["key" => "value"], ["temperature" => 0.5])
+            ->with("test.skill", ["key" => "value"], $options)
             ->andReturn("LLM Response Text");
 
-        $logChannel = Mockery::mock();
-        $logChannel->shouldReceive("info")->twice();
-        Log::shouldReceive("channel")
-            ->twice()
-            ->with("daily")
-            ->andReturn($logChannel);
+        $this->mockLogChannel(2); // START + DONE
 
         $result = $this->service->execute(
             "test.skill",
             ["key" => "value"],
-            ["temperature" => 0.5],
+            $options,
         );
 
         $this->assertSame("LLM Response Text", $result);
     }
 
     /**
-     * @testdoc Verify that execute() logs the skill key and variable keys
-     *          in the entry log message.
+     * Verify that execute() logs the skill key, domain, and variable keys
+     * in the START entry (2-arg call) and the DONE entry (1-arg call).
      */
     #[Test]
-    public function execute_logs_entry_with_skill_and_variable_keys(): void
+    public function execute_logs_start_with_skill_domain_and_variable_keys(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
+
+        $options = ["_domain" => "example.com", "temperature" => 0.3];
 
         $this->baseExecutor->shouldReceive("execute")->once()->andReturn("ok");
 
         $logChannel = Mockery::mock();
+
+        // START: 2 args (message string + context array)
         $logChannel
             ->shouldReceive("info")
             ->once()
-            ->withArgs(function (string $msg, array $ctx): bool {
-                return str_contains($msg, "[AI Skill Init]") &&
+            ->withArgs(function (...$args) use ($options): bool {
+                if (count($args) !== 2) {
+                    return false;
+                }
+                [$msg, $ctx] = $args;
+                return str_contains($msg, "[AI] START") &&
                     str_contains($msg, "test.skill") &&
-                    $ctx["variables_keys"] === ["title", "body"] &&
-                    $ctx["options"] === ["temperature" => 0.3];
+                    str_contains($msg, "example.com") &&
+                    ($ctx["variables_keys"] ?? null) === ["title", "body"] &&
+                    ($ctx["options"] ?? null) === $options;
             });
-        $logChannel->shouldReceive("info")->once();
+
+        // DONE: 1 arg (message string only)
+        $logChannel
+            ->shouldReceive("info")
+            ->once()
+            ->withArgs(function (...$args): bool {
+                if (count($args) !== 1) {
+                    return false;
+                }
+                return str_contains($args[0], "[AI] DONE") &&
+                    str_contains($args[0], "test.skill") &&
+                    str_contains($args[0], "example.com");
+            });
+
         Log::shouldReceive("channel")
             ->twice()
             ->with("daily")
@@ -139,53 +167,46 @@ class AuditedSkillExecutorTest extends TestCase
         $this->service->execute(
             "test.skill",
             ["title" => "T", "body" => "B"],
-            ["temperature" => 0.3],
+            $options,
         );
     }
 
     // ─── execute() — performance warning ───────────────────────────────────
 
     /**
-     * @testdoc Verify that execute() triggers a warning log when execution
-     *          time exceeds 45 seconds.
+     * Verify that no warning is triggered for fast execution (< 45s).
      */
     #[Test]
-    public function execute_triggers_performance_warning_over_45s(): void
+    public function execute_does_not_trigger_warning_for_fast_execution(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
 
-        // Simulate slow execution by making the base executor sleep
         $this->baseExecutor
             ->shouldReceive("execute")
             ->once()
-            ->andReturnUsing(function () {
-                usleep(50000); // 50ms — not enough for real 45s, so we test the logic differently
-                return "slow result";
-            });
+            ->andReturn("fast result");
 
-        // Since we can't actually wait 45s, we test the threshold logic
-        // by verifying the warning is NOT triggered for fast execution
         $logChannel = Mockery::mock();
         $logChannel->shouldReceive("info")->twice();
         $logChannel->shouldReceive("warning")->never();
+
         Log::shouldReceive("channel")
             ->twice()
             ->with("daily")
             ->andReturn($logChannel);
 
-        $this->service->execute("fast.skill", [], []);
+        $this->service->execute("fast.skill", [], ["_domain" => "test.com"]);
     }
 
     // ─── execute() — error handling ────────────────────────────────────────
 
     /**
-     * @testdoc Verify that execute() logs the error and re-throws the
-     *          exception from the base executor.
+     * Verify that execute() logs a FAIL entry and re-throws the exception.
      */
     #[Test]
     public function execute_logs_and_rethrows_on_failure(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
 
         $this->baseExecutor
             ->shouldReceive("execute")
@@ -193,15 +214,31 @@ class AuditedSkillExecutorTest extends TestCase
             ->andThrow(new \RuntimeException("Model timeout"));
 
         $logChannel = Mockery::mock();
-        $logChannel->shouldReceive("info")->once(); // entry log
+
+        // START: 2 args
+        $logChannel
+            ->shouldReceive("info")
+            ->once()
+            ->withArgs(function (...$args): bool {
+                return count($args) === 2 &&
+                    str_contains($args[0], "[AI] START");
+            });
+
+        // FAIL: 2 args (message + context)
         $logChannel
             ->shouldReceive("error")
             ->once()
-            ->withArgs(function (string $msg, array $ctx): bool {
-                return str_contains($msg, "[AI Skill Failure]") &&
+            ->withArgs(function (...$args): bool {
+                if (count($args) !== 2) {
+                    return false;
+                }
+                [$msg, $ctx] = $args;
+                return str_contains($msg, "[AI] FAIL") &&
                     str_contains($msg, "Model timeout") &&
+                    ($ctx["exception"] ?? "") === \RuntimeException::class &&
                     isset($ctx["trace"]);
             });
+
         Log::shouldReceive("channel")
             ->twice()
             ->with("daily")
@@ -210,176 +247,228 @@ class AuditedSkillExecutorTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage("Model timeout");
 
-        $this->service->execute("failing.skill", [], []);
+        $this->service->execute("failing.skill", [], ["_domain" => "test.com"]);
     }
 
     // ─── File-based audit logging ──────────────────────────────────────────
 
     /**
-     * @testdoc Verify that execute() writes a prompt tree entry to the
-     *          audit log file containing the skill key and variables.
+     * Verify that execute() writes a PROMPT INPUT block to the per-run
+     * audit log file containing the skill key, domain, and variables.
      */
     #[Test]
     public function execute_writes_prompt_tree_to_audit_log(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
 
         $this->baseExecutor
             ->shouldReceive("execute")
             ->once()
             ->andReturn("Response");
 
-        $logChannel = Mockery::mock();
-        $logChannel->shouldReceive("info")->twice();
-        Log::shouldReceive("channel")
-            ->twice()
-            ->with("daily")
-            ->andReturn($logChannel);
+        $this->mockLogChannel(2);
 
         $this->service->execute(
             "my.skill",
             ["title" => "Test Title", "body" => "Test Body"],
-            [],
+            ["_domain" => "example.com"],
         );
 
         $logFile = $this->findAuditLogFile();
         $this->assertNotNull($logFile, "Audit log file should exist");
 
-        $content = file_get_contents($logFile);
-        $this->assertStringContainsString("[PROMPT INPUT]", $content);
+        $content = (string) file_get_contents($logFile);
+        $this->assertStringContainsString("PROMPT INPUT", $content);
         $this->assertStringContainsString("my.skill", $content);
+        $this->assertStringContainsString("example.com", $content);
         $this->assertStringContainsString("Test Title", $content);
         $this->assertStringContainsString("Test Body", $content);
     }
 
     /**
-     * @testdoc Verify that execute() appends the LLM response to the
-     *          audit log file after successful execution.
+     * Verify that execute() appends an LLM RESPONSE block to the
+     * per-run audit log file after successful execution.
      */
     #[Test]
     public function execute_writes_response_tree_to_audit_log(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
 
         $this->baseExecutor
             ->shouldReceive("execute")
             ->once()
             ->andReturn("The generated article content.");
 
-        $logChannel = Mockery::mock();
-        $logChannel->shouldReceive("info")->twice();
-        Log::shouldReceive("channel")
-            ->twice()
-            ->with("daily")
-            ->andReturn($logChannel);
+        $this->mockLogChannel(2);
 
-        $this->service->execute("article.skill", ["topic" => "AI"], []);
+        $this->service->execute(
+            "article.skill",
+            ["topic" => "AI"],
+            ["_domain" => "example.com"],
+        );
 
         $logFile = $this->findAuditLogFile();
-        $content = file_get_contents($logFile);
+        $this->assertNotNull($logFile, "Audit log file should exist");
+        $content = (string) file_get_contents($logFile);
 
-        $this->assertStringContainsString("[LLM RESPONSE OUTPUT]", $content);
+        $this->assertStringContainsString("LLM RESPONSE", $content);
         $this->assertStringContainsString(
             "The generated article content.",
             $content,
         );
         $this->assertStringContainsString("article.skill", $content);
+        $this->assertStringContainsString("Status:  OK", $content);
     }
 
     /**
-     * @testdoc Verify that array variables are JSON-encoded in the
-     *          prompt tree log entry.
+     * Verify that array variables are JSON-encoded in the PROMPT INPUT block.
      */
     #[Test]
     public function execute_json_encodes_array_variables_in_prompt_tree(): void
     {
-        putenv("LOGGING=logs/audit_test");
+        $this->setLogDir();
 
         $this->baseExecutor->shouldReceive("execute")->once()->andReturn("ok");
 
-        $logChannel = Mockery::mock();
-        $logChannel->shouldReceive("info")->twice();
-        Log::shouldReceive("channel")
-            ->twice()
-            ->with("daily")
-            ->andReturn($logChannel);
+        $this->mockLogChannel(2);
 
         $this->service->execute(
             "test.skill",
             ["tags" => ["ai", "ml", "nlp"]],
-            [],
+            ["_domain" => "example.com"],
         );
 
         $logFile = $this->findAuditLogFile();
-        $content = file_get_contents($logFile);
+        $this->assertNotNull($logFile, "Audit log file should exist");
+        $content = (string) file_get_contents($logFile);
 
         $this->assertStringContainsString('"ai"', $content);
         $this->assertStringContainsString('"ml"', $content);
+        $this->assertStringContainsString('"nlp"', $content);
     }
 
     // ─── getDynamicLogPath() ───────────────────────────────────────────────
 
     /**
-     * @testdoc Verify that getDynamicLogPath() uses the LOGGING env variable
-     *          and creates the directory if it doesn't exist.
+     * Verify that getDynamicLogPath() uses the LOGGING env variable
+     * (relative to base_path) and creates the {date_Hi}/{domain}/ directory.
      */
     #[Test]
     public function getDynamicLogPath_uses_logging_env_when_set(): void
     {
-        $relativePath = "logs/custom_audit";
-        putenv("LOGGING={$relativePath}");
+        putenv("LOGGING=" . $this->logDir);
 
-        $path = $this->invokeGetDynamicLogPath();
+        $path = $this->invokeGetDynamicLogPath("test-run-id", "example.com");
 
-        $this->assertStringContainsString("custom_audit", $path);
-        $this->assertStringContainsString("ai_audit_", $path);
-        $this->assertStringEndsWith(".log", $path);
+        $this->assertStringStartsWith($this->logDirAbsolute, $path);
+        $this->assertStringContainsString("example.com", $path);
+        $this->assertStringEndsWith("test-run-id.log", $path);
         $this->assertDirectoryExists(dirname($path));
     }
 
     /**
-     * @testdoc Verify that getDynamicLogPath() falls back to storage/logs/
-     *          when the LOGGING env variable is not set.
+     * Verify that getDynamicLogPath() falls back to storage/logs/
+     * when the LOGGING env variable is not set.
      */
     #[Test]
     public function getDynamicLogPath_falls_back_to_storage_logs(): void
     {
         putenv("LOGGING");
 
-        $path = $this->invokeGetDynamicLogPath();
+        $path = $this->invokeGetDynamicLogPath("test-run-id", "example.com");
 
         $this->assertStringContainsString("storage", $path);
         $this->assertStringContainsString("logs", $path);
-        $this->assertStringContainsString("ai_audit_", $path);
-        $this->assertStringEndsWith(".log", $path);
+        $this->assertStringContainsString("example.com", $path);
+        $this->assertStringEndsWith("test-run-id.log", $path);
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────
 
     /**
-     * Find the audit log file created in the current test's log directory.
+     * Set the LOGGING env to the relative temp path so audit files
+     * land under base_path() in a known, testable location.
+     */
+    private function setLogDir(): void
+    {
+        putenv("LOGGING=" . $this->logDir);
+    }
+
+    /**
+     * Create a mock Log channel that accepts $expectedInfoCalls info() calls.
+     */
+    private function mockLogChannel(int $expectedInfoCalls): void
+    {
+        $logChannel = Mockery::mock();
+        $logChannel->shouldReceive("info")->times($expectedInfoCalls);
+        Log::shouldReceive("channel")
+            ->times($expectedInfoCalls)
+            ->with("daily")
+            ->andReturn($logChannel);
+    }
+
+    /**
+     * Recursively find the most recent .log file under the test log directory.
+     *
+     * Expected structure: {logDirAbsolute}/{YYYY-MM-DD_Hi}/{domain}/{runId}.log
      */
     private function findAuditLogFile(): ?string
     {
-        $files =
-            glob($this->logDir . "/ai_audit_*.log") ?:
-            glob(base_path("logs/audit_test/ai_audit_*.log"));
+        $files = glob($this->logDirAbsolute . "/*/*/*.log");
 
-        return $files ? end($files) : null;
+        if (empty($files)) {
+            $files = $this->findLogFilesRecursive($this->logDirAbsolute);
+        }
+
+        if (empty($files)) {
+            return null;
+        }
+
+        usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
+        return $files[0];
+    }
+
+    /**
+     * Recursively find all .log files under a directory.
+     *
+     * @return string[]
+     */
+    private function findLogFilesRecursive(string $dir): array
+    {
+        $results = [];
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $dir,
+                \FilesystemIterator::SKIP_DOTS,
+            ),
+        );
+
+        foreach ($items as $item) {
+            if (
+                $item->isFile() &&
+                str_ends_with($item->getFilename(), ".log")
+            ) {
+                $results[] = $item->getPathname();
+            }
+        }
+
+        return $results;
     }
 
     /**
      * Invoke the protected getDynamicLogPath() via reflection.
      */
-    private function invokeGetDynamicLogPath(): string
-    {
+    private function invokeGetDynamicLogPath(
+        string $runId,
+        string $domain,
+    ): string {
         $method = new \ReflectionMethod(
             AuditedSkillExecutor::class,
             "getDynamicLogPath",
         );
         $method->setAccessible(true);
 
-        return $method->invoke($this->service);
+        return $method->invoke($this->service, $runId, $domain);
     }
 
     /**

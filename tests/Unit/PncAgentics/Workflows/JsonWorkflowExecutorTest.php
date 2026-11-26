@@ -24,6 +24,7 @@ use Tests\TestCase;
  * Tests the orchestration layer — how the executor:
  *  - Iterates the two-level tracks array (domain → type-lang).
  *  - Builds a flat context per track via buildContext().
+ *  - Injects _domain into stage options before delegating to the skill executor.
  *  - Loads the workflow definition per track's "workflow" field.
  *  - Dispatches linear stages (skill call → transform → store in context).
  *  - Dispatches loop stages via LoopStageExecutor.
@@ -85,7 +86,6 @@ class JsonWorkflowExecutorTest extends TestCase
 
         $this->executor = Mockery::mock(SkillExecutorInterface::class);
 
-        // Point the WorkflowDefinitionLoader at our temp definitions dir.
         config()->set("pnc.workflows.definitions_dir", $this->definitionsDir);
         config()->set("pnc.workflows.override_dir", null);
 
@@ -111,10 +111,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — basic structure passthrough
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * The returned structure should preserve all original top-level keys
-     * and add a "workflow_results" key.
-     */
     #[Test]
     public function execute_preserves_structure_and_adds_workflow_results(): void
     {
@@ -137,7 +133,6 @@ class JsonWorkflowExecutorTest extends TestCase
         $structure = $this->buildStructure();
         $result = $this->sut->execute($structure);
 
-        // Original keys preserved
         $this->assertSame($structure["uuid"], $result["uuid"]);
         $this->assertSame($structure["title"], $result["title"]);
         $this->assertSame($structure["title_slug"], $result["title_slug"]);
@@ -148,13 +143,9 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->assertSame($structure["research_dir"], $result["research_dir"]);
         $this->assertSame($structure["tracks"], $result["tracks"]);
 
-        // workflow_results added
         $this->assertArrayHasKey("workflow_results", $result);
     }
 
-    /**
-     * The workflow_results key should be keyed by domain → trackKey.
-     */
     #[Test]
     public function execute_workflow_results_keyed_by_domain_and_track(): void
     {
@@ -192,11 +183,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — linear stages
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * A single linear stage should call the executor with resolved variables
-     * and options, store the result under output_key, and wrap string output
-     * in a ["text" => ...] array.
-     */
     #[Test]
     public function execute_singleLinearStageWrapsStringInTextArray(): void
     {
@@ -217,7 +203,7 @@ class JsonWorkflowExecutorTest extends TestCase
             ->with(
                 "research_preparation.outline_generator",
                 ["title" => "Can AI models be deployed on-premises?"],
-                ["temperature" => 0.2],
+                ["temperature" => 0.2, "_domain" => "blog.com"],
             )
             ->andReturn("Generated outline");
 
@@ -230,10 +216,6 @@ class JsonWorkflowExecutorTest extends TestCase
         );
     }
 
-    /**
-     * Multiple linear stages should pass context forward — the output_key
-     * of one stage is available as a {{key}} variable in the next stage.
-     */
     #[Test]
     public function execute_chainedStagesPassContextForward(): void
     {
@@ -260,14 +242,14 @@ class JsonWorkflowExecutorTest extends TestCase
             ->with(
                 "stage_one",
                 ["input" => "Can AI models be deployed on-premises?"],
-                [],
+                ["_domain" => "blog.com"],
             )
             ->andReturn("World");
 
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("stage_two", ["input" => "World"], [])
+            ->with("stage_two", ["input" => "World"], ["_domain" => "blog.com"])
             ->andReturn("Done");
 
         $structure = $this->buildStructure();
@@ -279,9 +261,6 @@ class JsonWorkflowExecutorTest extends TestCase
         );
     }
 
-    /**
-     * The "skill" field should support {{key}} interpolation from context.
-     */
     #[Test]
     public function execute_resolvesDynamicSkillKeyFromContext(): void
     {
@@ -299,7 +278,11 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("blog.com.core_writing.hook_writer", [], [])
+            ->with(
+                "blog.com.core_writing.hook_writer",
+                [],
+                ["_domain" => "blog.com"],
+            )
             ->andReturn("Hook content");
 
         $structure = $this->buildStructure();
@@ -315,10 +298,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — context building
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * The context passed to the executor should contain all expected keys
-     * derived from the structure and the track.
-     */
     #[Test]
     public function execute_builds_context_from_structure_and_track(): void
     {
@@ -346,8 +325,13 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->withArgs(function (string $skill, array $vars): bool {
-                return $vars["domain"] === "blog.com" &&
+            ->withArgs(function (...$args): bool {
+                if (count($args) < 2) {
+                    return false;
+                }
+                [$skill, $vars] = $args;
+                return $skill === "context_checker" &&
+                    $vars["domain"] === "blog.com" &&
                     $vars["context"] === "This for marketing" &&
                     $vars["type"] === "blog" &&
                     $vars["lang"] === "en" &&
@@ -367,10 +351,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — multi-track iteration
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * With two tracks, the executor should be called once per track and
-     * workflow_results should contain entries for both.
-     */
     #[Test]
     public function execute_iterates_all_tracks(): void
     {
@@ -388,13 +368,21 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("writer", ["domain" => "blog.com"], [])
+            ->with(
+                "writer",
+                ["domain" => "blog.com"],
+                ["_domain" => "blog.com"],
+            )
             ->andReturn("Blog output");
 
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("writer", ["domain" => "meeting.com"], [])
+            ->with(
+                "writer",
+                ["domain" => "meeting.com"],
+                ["_domain" => "meeting.com"],
+            )
             ->andReturn("Meeting output");
 
         $structure = $this->buildStructure([
@@ -433,10 +421,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — transforms
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * A stage with "transform": "strip_code_fence" should have the transform
-     * applied before storing in context.
-     */
     #[Test]
     public function execute_appliesStripCodeFenceTransform(): void
     {
@@ -460,7 +444,6 @@ class JsonWorkflowExecutorTest extends TestCase
         $structure = $this->buildStructure();
         $result = $this->sut->execute($structure);
 
-        // After strip_code_fence: '["a", "b"]' → json_decode → array
         $this->assertSame(
             ["a", "b"],
             $result["workflow_results"]["blog.com"]["blog-en"],
@@ -471,14 +454,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — loop stages
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * A loop stage should iterate over the source array, execute sub-stages
-     * for each item, and accumulate results. Since the last stage is a loop,
-     * the return value comes from the accumulate key.
-     *
-     * The accumulated string is not valid JSON, so production wraps it in
-     * ["text" => $raw].
-     */
     #[Test]
     public function execute_loopStageIteratesAndAccumulates(): void
     {
@@ -512,18 +487,27 @@ class JsonWorkflowExecutorTest extends TestCase
             ],
         ]);
 
-        // First call: section_generator (returns JSON string of sections)
+        // First call: section_generator
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("section_generator", [], [])
+            ->withArgs(function (...$args): bool {
+                return $args[0] === "section_generator";
+            })
             ->andReturn(json_encode(["Intro", "Conclusion"]));
 
         // Second + third calls: loop sub-stages (one per item)
         $this->executor
             ->shouldReceive("execute")
             ->twice()
-            ->andReturnUsing(function (string $skill, array $vars): string {
+            ->withArgs(function (...$args): bool {
+                return $args[0] === "writer";
+            })
+            ->andReturnUsing(function (
+                string $skill,
+                array $vars,
+                array $options,
+            ): string {
                 $section = $vars["section"] ?? "unknown";
                 return "Content for {$section}";
             });
@@ -531,7 +515,6 @@ class JsonWorkflowExecutorTest extends TestCase
         $structure = $this->buildStructure();
         $result = $this->sut->execute($structure);
 
-        // Production wraps non-JSON string output in ["text" => ...]
         $this->assertSame(
             [
                 "text" =>
@@ -545,10 +528,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — persistence to disk
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * When content_path_markdown is set, the output text should be written
-     * to that file.
-     */
     #[Test]
     public function execute_persists_markdown_to_content_path(): void
     {
@@ -581,17 +560,10 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->assertFileExists($mdPath);
         $this->assertSame(
             "# My Article\n\nContent here.",
-            file_get_contents($mdPath),
+            (string) file_get_contents($mdPath),
         );
     }
 
-    /**
-     * When content_path_json is set and the file exists, the output should
-     * be merged into the JSON under the "content" key.
-     *
-     * NOTE: SkillExecutorInterface::execute() returns string, so the mock
-     * must return a JSON-encoded string (not an array).
-     */
     #[Test]
     public function execute_persists_json_to_content_path(): void
     {
@@ -614,8 +586,6 @@ class JsonWorkflowExecutorTest extends TestCase
             ],
         ]);
 
-        // Must return a STRING (interface return type is string).
-        // The production code json_decodes it if valid JSON.
         $this->executor
             ->shouldReceive("execute")
             ->once()
@@ -629,13 +599,9 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->sut->execute($structure);
 
         $data = json_decode((string) file_get_contents($jsonPath), true);
-        // Production json_decodes the string result → array → stored as "content"
         $this->assertSame(["text" => "JSON content"], $data["content"]);
     }
 
-    /**
-     * When content_path_markdown is empty, no file should be written.
-     */
     #[Test]
     public function execute_does_not_persist_markdown_when_path_empty(): void
     {
@@ -658,7 +624,6 @@ class JsonWorkflowExecutorTest extends TestCase
 
         $this->sut->execute($structure);
 
-        // No assertion needed — just verify no exception was thrown.
         $this->assertTrue(true);
     }
 
@@ -666,10 +631,6 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — definition loading
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * When the workflow file is not found and no blog_post.json fallback
-     * exists, a RuntimeException should be thrown.
-     */
     #[Test]
     public function execute_throwsWhenDefinitionNotFound(): void
     {
@@ -683,10 +644,6 @@ class JsonWorkflowExecutorTest extends TestCase
         $this->sut->execute($structure);
     }
 
-    /**
-     * When the workflow file contains invalid JSON, a RuntimeException
-     * should be thrown.
-     */
     #[Test]
     public function execute_throwsOnInvalidJson(): void
     {
@@ -708,17 +665,9 @@ class JsonWorkflowExecutorTest extends TestCase
     // execute() — config override for definitions
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * When pnc.workflows.override_dir is set (as a RELATIVE path) and the
-     * file exists there, it should be preferred over the default dir.
-     *
-     * NOTE: Production resolves the override via base_path($configOverride),
-     * so the config value must be relative.
-     */
     #[Test]
     public function execute_prefersConfigOverrideDefinition(): void
     {
-        // Use a relative path — production resolves it via base_path()
         $overrideRelative = "test_wf_override_" . uniqid();
         $overrideAbsolute = base_path($overrideRelative);
         mkdir($overrideAbsolute, 0755, true);
@@ -751,13 +700,12 @@ class JsonWorkflowExecutorTest extends TestCase
             ]),
         );
 
-        // Set the config to the RELATIVE path
         config()->set("pnc.workflows.override_dir", $overrideRelative);
 
         $this->executor
             ->shouldReceive("execute")
             ->once()
-            ->with("override_skill", [], [])
+            ->with("override_skill", [], ["_domain" => "blog.com"])
             ->andReturn("from override");
 
         $structure = $this->buildStructure();
@@ -809,7 +757,7 @@ class JsonWorkflowExecutorTest extends TestCase
     }
 
     /**
-     * Build a single track entry with all 18 documented fields.
+     * Build a single track entry with all documented fields.
      */
     private function buildTrack(
         string $domain,
@@ -817,8 +765,6 @@ class JsonWorkflowExecutorTest extends TestCase
         string $trackKey,
         string $context,
     ): array {
-        $domainSlug = \Illuminate\Support\Str::slug($domain, "_");
-        $typeSlug = \Illuminate\Support\Str::slug($type, "_");
         $lang = explode("-", $trackKey)[1] ?? "en";
 
         return [

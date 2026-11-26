@@ -97,7 +97,7 @@ class JsonWorkflowExecutor implements
     /**
      * @param SkillExecutorInterface $executor The skill executor for LLM calls.
      */
-    public function __construct(protected SkillExecutorInterface $executor)
+    public function __construct(protected SkillExecutorInterface $skillExecutor)
     {
         $this->loader = new WorkflowDefinitionLoader();
         $this->resolver = new TemplateResolver();
@@ -165,6 +165,7 @@ class JsonWorkflowExecutor implements
         foreach ($structure["tracks"] as $domain => $domainTracks) {
             foreach ($domainTracks as $trackKey => $track) {
                 $context = $this->buildContext($structure, $track);
+                $context["_domain"] = $domain;
 
                 $definition = $this->loader->load($context["workflow"]);
                 foreach ($definition["stages"] as $stage) {
@@ -195,7 +196,7 @@ class JsonWorkflowExecutor implements
         }
 
         $structure["workflow_results"] = $results;
-
+        //   dd($structure);
         return $structure;
     }
 
@@ -228,8 +229,9 @@ class JsonWorkflowExecutor implements
             $context,
         );
         $options = $stage["options"] ?? [];
+        $options["_domain"] = $context["_domain"] ?? "unknown";
 
-        $result = $this->executor->execute(
+        $result = $this->skillExecutor->execute(
             $this->resolver->resolveTemplate($stage["skill"], $context),
             $variables,
             $options,
